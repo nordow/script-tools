@@ -1,0 +1,37 @@
+[default]
+timezone = "Asia/Shanghai"
+cookies = "<default_cookies>"
+
+[default.envs]
+hello = "Hello"
+world = "World"
+emojis = ["🤣", "🙃", "🫠"]
+
+[default.jobs.normal]
+cron = "0 0/30 * * * *"
+jitter = 600
+select = "random"
+templates = [
+    "<1> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][0]}",
+    "<2> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][1]}",
+    "<3> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][2]}",
+    { text = "<4> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {mods['random'].choice(envs['emojis'])}" }
+]
+
+[default.jobs.double]
+cron = "0 0/15 * * * *"
+jitter = 300
+select = "random"
+templates = [
+    "[1] Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][0]}",
+    "[2] Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][1]}",
+    "[3] Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][2]}",
+    { text = "[4] Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {mods['random'].choice(envs['emojis'])}" }
+]
+
+[coder]
+cookies = "<coder_cookies>"
+
+[coder.envs]
+hello = "World"
+world = "Hello"
