@@ -21,6 +21,7 @@ from apscheduler.triggers.cron import CronTrigger
 from selenium import webdriver
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -89,7 +90,10 @@ class Bot:
             app_xpath = '//div[@id="app"]'
 
             driver.get("https://weibo.com")
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.XPATH, app_xpath)))
+
+            loading_wait = WebDriverWait(driver, 30)
+
+            loading_wait.until(EC.presence_of_element_located((By.XPATH, app_xpath)))
 
             for key, morsel in SimpleCookie(cookies).items():
                 cookie = {
@@ -108,7 +112,11 @@ class Bot:
             home_wrap_xpath = '//div[@id="homeWrap"]'
 
             driver.refresh()
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
+            loading_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
+
+            driver.execute_script("window.open('', '_blank')")
+            driver.close()
+            driver.switch_to.window(driver.window_handles[-1])
 
         def send_post(driver: WebDriver, args: dict[str, Any], preview: bool) -> None:
 
@@ -170,19 +178,32 @@ class Bot:
             if preview:
                 return
 
-            text_textarea_xpath = '//div[@id="homeWrap"]/div[1]/div/div[1]/div/textarea'
-            send_button_xpath = '//div[@id="homeWrap"]/div[1]/div/div[4]/div/div[5]/button'
-            # file_input_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[1]/div/div/input'
+            driver.execute_script("window.open('https://weibo.com', '_blank')")
+            driver.switch_to.window(driver.window_handles[-1])
 
-            text_textarea = driver.find_element(By.XPATH, text_textarea_xpath)
-            send_button = driver.find_element(By.XPATH, send_button_xpath)
-            # file_input = driver.find_element(By.XPATH, file_input_xpath)
+            try:
+                element_wait = WebDriverWait(driver, 30)
 
-            text_textarea.clear()
-            text_textarea.send_keys(text)
-            send_button.click()
+                text_textarea_xpath = '//div[@id="homeWrap"]/div[1]/div/div[1]/div/textarea'
+                send_button_xpath = '//div[@id="homeWrap"]/div[1]/div/div[4]/div/div[5]/button'
+                # file_input_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[1]/div/div/input'
 
-            WebDriverWait(driver, 10).until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+                text_textarea: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, text_textarea_xpath)))
+                send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
+                # file_input: WebElement = wait.until(EC.presence_of_element_located((By.XPATH, file_input_xpath)))
+
+                text_textarea.clear()
+                text_textarea.send_keys(text)
+
+                execution_wait = WebDriverWait(driver, 10)
+
+                execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+                send_button.click()
+                execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+            finally:
+                driver.close()
+                driver.switch_to.window(driver.window_handles[-1])
 
         conf = self.__conf
         preview = self.__preview
