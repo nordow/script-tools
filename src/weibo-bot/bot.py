@@ -21,6 +21,7 @@ from apscheduler.triggers.cron import CronTrigger
 from selenium import webdriver
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -192,7 +193,9 @@ class Bot:
                 send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
                 # file_input: WebElement = wait.until(EC.presence_of_element_located((By.XPATH, file_input_xpath)))
 
-                text_textarea.clear()
+                # text_textarea.clear()
+                text_textarea.send_keys(Keys.CONTROL, "A")
+                text_textarea.send_keys(Keys.DELETE)
                 text_textarea.send_keys(text)
 
                 execution_wait = WebDriverWait(driver, 15)
