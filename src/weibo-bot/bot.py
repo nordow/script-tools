@@ -195,10 +195,11 @@ class Bot:
                 text_textarea.clear()
                 text_textarea.send_keys(text)
 
-                execution_wait = WebDriverWait(driver, 10)
+                execution_wait = WebDriverWait(driver, 15)
 
                 execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
-                send_button.click()
+                # send_button.click()
+                driver.execute_script("arguments[0].click();", send_button)
                 execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
 
             finally:
