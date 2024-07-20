@@ -7,6 +7,11 @@ hello = "Hello"
 world = "World"
 emojis = ["🤣", "🙃", "🫠"]
 
+[default.mods]
+random = "random"
+datetime = { type = "module", value = "datetime" }
+two = { type = "expression", value = "1 + 1" }
+
 [default.jobs.normal]
 cron = "0 0/30 * * * *"
 jitter = 600

@@ -103,6 +103,45 @@ class Bot:
 
     def init(self) -> None:
 
+        def import_mods(mods: dict[str, Any], envs: dict[str, Any], user_name: str) -> dict[str, Any]:
+
+            def normalize_mod(mod, mod_id: str) -> dict[str, Any]:
+                if isinstance(mod, str):
+                    return {
+                        "type": "module",
+                        "value": mod
+                    }
+                elif isinstance(mod, dict):
+                    return {
+                        "type": mod["type"],
+                        "value": mod["value"]
+                    }
+                else:
+                    raise TypeError(f"Wrong type of mod '{mod_id}'; got '{type(mod).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+
+            imported_mods: dict[str, Any] = {}
+
+            for mod_name, mod_conf in mods.items():
+                mod_id = f"{user_name}.{mod_name}"
+
+                mod = normalize_mod(mod_conf, mod_id)
+                mod_type: str = mod["type"]
+                mod_value: str = mod["value"]
+
+                imported_mod: Any
+
+                match mod_type:
+                    case "module":
+                        imported_mod = importlib.import_module(mod_value)
+                    case "expression":
+                        imported_mod = _safe_eval(mod_value, envs = envs)
+                    case _:
+                        raise ValueError(f"Wrong value of type for mod '{mod_id}'; got {repr(mod_type)}, expected 'module' or 'expression'")
+                    
+                imported_mods[mod_name] = imported_mod
+
+            return imported_mods
+
         def load_page(driver: WebDriver, cookies: str) -> None:
             app_xpath = '//div[@id="app"]'
 
@@ -137,7 +176,7 @@ class Bot:
 
         def send_post(driver: WebDriver, args: dict[str, Any], preview: bool) -> None:
 
-            def normalize_template(template) -> dict[str, Any]:
+            def normalize_template(template, job_id: str) -> dict[str, Any]:
                 if isinstance(template, str):
                     return {
                         "text": template,
@@ -151,12 +190,13 @@ class Bot:
                         "videos": template.get("videos", [])
                     }
                 else:
-                    raise TypeError(f"Wrong type of template; got '{type(template).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+                    raise TypeError(f"Wrong type of template for [{job_id}]; got '{type(template).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
 
             job_id: str = args["job_id"]
 
             timezone: str | None = args["timezone"]
             envs: dict[str, Any] = args["envs"]
+            mods: dict[str, Any] = args["mods"]
 
             select: str = args["select"]
             templates: list[str | dict[str, Any]] = args["templates"]
@@ -164,22 +204,20 @@ class Bot:
             if not templates:
                 raise ValueError(f"Wrong value of templates for [{job_id}]; got {templates}, expected [...]")
 
+            template_conf: str | dict[str, Any]
+
             match select:
                 case "random":
-                    template: str | dict[str, Any] = random.choice(templates)
+                    template_conf = random.choice(templates)
                 case _:
                     raise ValueError(f"Wrong value of select for [{job_id}]; got {repr(select)}, expected 'random'")
 
-            template = normalize_template(template)
-            mods = {
-                "random": importlib.import_module("random"),
-                # "requests": importlib.import_module("requests")
-            }
+            template = normalize_template(template_conf, job_id)
             vars = {
                 "now": datetime.now(pytz.timezone(timezone) if timezone is not None else None)
             }
 
-            text = _format_fstring(template["text"], mods = mods, vars = vars, envs = envs)
+            text = _format_fstring(template["text"], envs = envs, mods = mods, vars = vars)
 
             _logger.info(
                 _format_message(
@@ -236,11 +274,15 @@ class Bot:
                 **(conf["default"].get("envs", {})),
                 **(user_conf.get("envs", {}))
             })
-            jobs_conf: dict[str, dict[str, Any]] = user_conf.get("jobs", conf["default"].get("jobs", {}))
+            mods: dict[str, Any] = import_mods({
+                **(conf["default"].get("mods", {})),
+                **(user_conf.get("mods", {}))
+            }, envs, user_name)
+            jobs: dict[str, dict[str, Any]] = user_conf.get("jobs", conf["default"].get("jobs", {}))
             drivers: dict[str, WebDriver] = {}
             scheduler = BackgroundScheduler()
 
-            for job_name, job_conf in jobs_conf.items():
+            for job_name, job_conf in jobs.items():
                 job_id = f"{user_name}.{job_name}"
 
                 options = webdriver.ChromeOptions()
@@ -272,6 +314,7 @@ class Bot:
 
                         "timezone": timezone,
                         "envs": envs,
+                        "mods": mods,
 
                         "select": job_select,
                         "templates": job_templates,
