@@ -3,6 +3,7 @@ timezone = "Asia/Shanghai"
 cookies = "<default_cookies>"
 
 [default.envs]
+timezone = "Asia/Shanghai"
 hello = "Hello"
 world = "World"
 emojis = ["🤣", "🙃", "🫠"]
@@ -10,7 +11,11 @@ emojis = ["🤣", "🙃", "🫠"]
 [default.mods]
 random = "random"
 datetime = { type = "module", value = "datetime" }
+pytz = { type = "module", value = "pytz" }
 two = { type = "expression", value = "1 + 1" }
+
+[default.vars]
+now = "mods['datetime'].datetime.now(mods['pytz'].timezone(envs['timezone']) if envs['timezone'] is not None else None)"
 
 [default.jobs.normal]
 cron = "0 0/30 * * * *"

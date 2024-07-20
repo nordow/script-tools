@@ -7,13 +7,11 @@ import random
 import signal
 import sys
 import tomllib
-from datetime import datetime
 from http.cookies import SimpleCookie
 from logging import config
 from threading import Event
 from typing import Any
 
-import pytz
 from apscheduler import events
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import BaseScheduler
