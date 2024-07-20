@@ -18,6 +18,9 @@ from apscheduler import events
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import BaseScheduler
 from apscheduler.triggers.cron import CronTrigger
+from RestrictedPython import compile_restricted, safe_builtins
+from RestrictedPython.Eval import (default_guarded_getitem,
+                                   default_guarded_getiter)
 from selenium import webdriver
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
@@ -37,13 +40,26 @@ _ACTION_EXECUTION = "Execution"
 
 
 _logger = logging.getLogger(__name__)
+_safe_globals = {
+    "__builtins__": {
+        **safe_builtins,
 
+        "_getitem_": default_guarded_getitem,
+        "_getiter_": default_guarded_getiter
+    }
+}
+
+
+def _safe_eval(expr: str, **kwargs) -> str:
+    code = compile_restricted(expr, mode = "eval")
+
+    return eval(code, _safe_globals, kwargs)
+
+def _format_fstring(fstring: str, **kwargs) -> str:
+    return _safe_eval(f'f{repr(fstring)}', **kwargs)
 
 def _format_message(sender, action, message, root: bool = False) -> str:
     return f"{f'<{sender}>' if root else f'[{sender}]':<16} - {action:<9} | {message}"
-
-def _format_fstring(fstring: str, **kwargs) -> str:
-    return eval(f'f{repr(fstring)}', kwargs)
 
 
 class FullCronTrigger(CronTrigger):
