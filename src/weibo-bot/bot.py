@@ -192,11 +192,21 @@ class Bot:
                 else:
                     raise TypeError(f"Wrong type of template for [{job_id}]; got '{type(template).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
 
+            def eval_vars(vars: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
+                evaluated_vars: dict[str, Any] = {}
+
+                for var_name, var_expr in vars.items():
+                    var = _safe_eval(var_expr, envs = envs, mods = mods)
+
+                    evaluated_vars[var_name] = var
+
+                return evaluated_vars
+
             job_id: str = args["job_id"]
 
-            timezone: str | None = args["timezone"]
             envs: dict[str, Any] = args["envs"]
             mods: dict[str, Any] = args["mods"]
+            vars: dict[str, Any] = args["vars"]
 
             select: str = args["select"]
             templates: list[str | dict[str, Any]] = args["templates"]
@@ -213,11 +223,7 @@ class Bot:
                     raise ValueError(f"Wrong value of select for [{job_id}]; got {repr(select)}, expected 'random'")
 
             template = normalize_template(template_conf, job_id)
-            vars = {
-                "now": datetime.now(pytz.timezone(timezone) if timezone is not None else None)
-            }
-
-            text = _format_fstring(template["text"], envs = envs, mods = mods, vars = vars)
+            text = _format_fstring(template["text"], envs = envs, mods = mods, vars = eval_vars(vars, envs, mods))
 
             _logger.info(
                 _format_message(
@@ -278,6 +284,10 @@ class Bot:
                 **(conf["default"].get("mods", {})),
                 **(user_conf.get("mods", {}))
             }, envs, user_name)
+            vars: dict[str, Any] = copy.deepcopy({
+                **(conf["default"].get("vars", {})),
+                **(user_conf.get("vars", {}))
+            })
             jobs: dict[str, dict[str, Any]] = user_conf.get("jobs", conf["default"].get("jobs", {}))
             drivers: dict[str, WebDriver] = {}
             scheduler = BackgroundScheduler()
@@ -312,9 +322,9 @@ class Bot:
                     "args": {
                         "job_id": job_id,
 
-                        "timezone": timezone,
                         "envs": envs,
                         "mods": mods,
+                        "vars": vars,
 
                         "select": job_select,
                         "templates": job_templates,
