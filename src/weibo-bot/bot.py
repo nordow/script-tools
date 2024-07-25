@@ -7,6 +7,7 @@ import random
 import signal
 import sys
 import tomllib
+import urllib.request
 from http.cookies import SimpleCookie
 from logging import config
 from threading import Event
@@ -33,11 +34,12 @@ __all__ = ["Bot"]
 
 _SYSTEM = "System"
 
-_ACTION_PROCESS = "Process"
-_ACTION_EXECUTION = "Execution"
+_EVENT_PROCESS = "Process"
+_EVENT_EXECUTION = "Execution"
 
 
 _logger = logging.getLogger(__name__)
+
 _safe_globals = {
     "__builtins__": {
         **safe_builtins,
@@ -56,8 +58,16 @@ def _safe_eval(expr: str, **kwargs) -> str:
 def _format_fstring(fstring: str, **kwargs) -> str:
     return _safe_eval(f'f{repr(fstring)}', **kwargs)
 
-def _format_message(sender, action, message, root: bool = False) -> str:
-    return f"{f'<{sender}>' if root else f'[{sender}]':<16} - {action:<9} | {message}"
+def _format_message(sender, event, message, root: bool = False) -> str:
+    return f"{f'<{sender}>' if root else f'[{sender}]':<16} - {event:<9} | {message}"
+
+def _try_delete_file(path: str) -> bool:
+    try:
+        os.remove(path)
+
+        return True
+    except OSError:
+        return False
 
 
 class FullCronTrigger(CronTrigger):
@@ -92,7 +102,7 @@ class User:
 class Bot:
     __conf: dict[str, Any]
     __preview: bool
-    __users: dict[str, User]
+    __users: dict[str, User] | None
 
     def __init__(self, conf: dict[str, Any], preview: bool) -> None:
         self.__conf = conf
@@ -135,7 +145,7 @@ class Bot:
                         imported_mod = _safe_eval(mod_value, envs = envs)
                     case _:
                         raise ValueError(f"Wrong value of type for mod '{mod_id}'; got {repr(mod_type)}, expected 'module' or 'expression'")
-                    
+
                 imported_mods[mod_name] = imported_mod
 
             return imported_mods
@@ -178,14 +188,12 @@ class Bot:
                 if isinstance(template, str):
                     return {
                         "text": template,
-                        "images": [],
-                        "videos": []
+                        "images": []
                     }
                 elif isinstance(template, dict):
                     return {
                         "text": template["text"],
-                        "images": template.get("images", []),
-                        "videos": template.get("videos", [])
+                        "images": template.get("images", [])
                     }
                 else:
                     raise TypeError(f"Wrong type of template for [{job_id}]; got '{type(template).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
@@ -200,6 +208,12 @@ class Bot:
 
                 return evaluated_vars
 
+            def convert_url_to_path(url: str) -> tuple[str, bool]:
+                if os.path.isfile(url):
+                    return (os.path.abspath(url), False)
+
+                return (urllib.request.urlretrieve(url)[0], True)
+
             job_id: str = args["job_id"]
 
             envs: dict[str, Any] = args["envs"]
@@ -210,7 +224,7 @@ class Bot:
             templates: list[str | dict[str, Any]] = args["templates"]
 
             if not templates:
-                raise ValueError(f"Wrong value of templates for [{job_id}]; got {templates}, expected [...]")
+                raise ValueError(f"Wrong value of templates for [{job_id}]; got {templates}, expected [templates]{{1,}}")
 
             template_conf: str | dict[str, Any]
 
@@ -221,18 +235,28 @@ class Bot:
                     raise ValueError(f"Wrong value of select for [{job_id}]; got {repr(select)}, expected 'random'")
 
             template = normalize_template(template_conf, job_id)
-            text = _format_fstring(template["text"], envs = envs, mods = mods, vars = eval_vars(vars, envs, mods))
+            template_text = template["text"]
+            template_images = template["images"]
+
+            template_kwargs = {
+                "envs": envs,
+                "mods": mods,
+                "vars": eval_vars(vars, envs, mods)
+            }
+
+            text = _format_fstring(template_text, **template_kwargs)
+            images = [_format_fstring(template_image, **template_kwargs) for template_image in template_images]
 
             _logger.info(
                 _format_message(
                     sender = job_id,
-                    action = _ACTION_PROCESS,
-                    message = f'{repr(template["text"])} -> {repr(text)}'
+                    event = _EVENT_PROCESS,
+                    message = f'{repr(template_conf)} -> {repr(text if not images else { "text": text, "images": images })}'
                 )
             )
 
-            if text.isspace():
-                raise ValueError(f"Wrong value of formatted text for [{job_id}]; got {repr(text)}, expected not whitespace")
+            if not images and text.isspace():
+                raise ValueError(f"Wrong value of formatted text for [{job_id}]; got {repr(text)}, expected not whitespace, if there is no images")
 
             if preview:
                 return
@@ -242,23 +266,54 @@ class Bot:
 
             try:
                 element_wait = WebDriverWait(driver, 30)
+                execution_wait = WebDriverWait(driver, 15)
 
                 text_textarea_xpath = '//div[@id="homeWrap"]/div[1]/div/div[1]/div/textarea'
                 send_button_xpath = '//div[@id="homeWrap"]/div[1]/div/div[4]/div/div[5]/button'
-                # file_input_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[1]/div/div/input'
 
                 text_textarea: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, text_textarea_xpath)))
                 send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
-                # file_input: WebElement = wait.until(EC.presence_of_element_located((By.XPATH, file_input_xpath)))
 
                 # text_textarea.clear()
                 text_textarea.send_keys(Keys.CONTROL, "A")
                 text_textarea.send_keys(Keys.DELETE)
+                execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+                if images:
+                    file_input_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/input'
+
+                    file_input: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, file_input_xpath.format(index = 1))))
+                    file_input_accept: str = file_input.get_attribute("accept")
+
+                    files: list[tuple[str, bool]] = []
+
+                    try:
+                        for image in images:
+                            files.append(convert_url_to_path(image))
+
+                        file_input.send_keys("\n".join((file[0] for file in files)))
+                        execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+                        upload_wait = WebDriverWait(driver, 60)
+
+                        item_div_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div'
+                        cover_img_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/img'
+
+                        file_div_list: list[WebElement] = execution_wait.until(EC.presence_of_all_elements_located((By.XPATH, item_div_xpath)))[:-1]
+
+                        if (files_diff := len(files) - len(file_div_list)) > 0:
+                            raise ValueError(f"Find {files_diff} unacceptable formatted image(s) for [{job_id}]; got {repr(images)}, expected [images]{{0,18}} or [images and videos]{{0,9}}, accepted {repr(file_input_accept)}")
+
+                        for index in range(len(file_div_list)):
+                            upload_wait.until(EC.presence_of_element_located((By.XPATH, cover_img_xpath.format(index = 1 + index))))
+
+                    finally:
+                        for path in (file[0] for file in files if file[1]):
+                            _try_delete_file(path)
+
                 text_textarea.send_keys(text)
-
-                execution_wait = WebDriverWait(driver, 15)
-
                 execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
                 # send_button.click()
                 driver.execute_script("arguments[0].click();", send_button)
                 execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
@@ -336,7 +391,7 @@ class Bot:
                 lambda event: _logger.info(
                     _format_message(
                         sender = event.job_id,
-                        action = _ACTION_EXECUTION,
+                        event = _EVENT_EXECUTION,
                         message = "Success!"
                     )
                 ),
@@ -346,7 +401,7 @@ class Bot:
                 lambda event: _logger.warning(
                     _format_message(
                         sender = event.job_id,
-                        action = _ACTION_EXECUTION,
+                        event = _EVENT_EXECUTION,
                         message = f"The job scheduled for '{event.scheduled_run_time:%Y-%m-%d %H:%M:%S}' has missed!"
                     )
                 ),
@@ -356,7 +411,7 @@ class Bot:
                 lambda event: _logger.warning(
                     _format_message(
                         sender = event.job_id,
-                        action = _ACTION_EXECUTION,
+                        event = _EVENT_EXECUTION,
                         message = f"The job scheduled for {[f'{scheduled_run_time:%Y-%m-%d %H:%M:%S}' for scheduled_run_time in event.scheduled_run_times]} has skipped!"
                     )
                 ),
@@ -366,7 +421,7 @@ class Bot:
                 lambda event: _logger.error(
                     _format_message(
                         sender = event.job_id,
-                        action = _ACTION_EXECUTION,
+                        event = _EVENT_EXECUTION,
                         message = f"Oops, an error occurred! -> {repr(event.exception)}"
                     )
                 ),
@@ -442,7 +497,7 @@ if __name__ == '__main__':
     sys.excepthook = lambda type, value, traceback: _logger.error(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = f"Oops, an error occurred! -> {repr(value)}",
             root = True
         )
@@ -451,7 +506,7 @@ if __name__ == '__main__':
     _logger.info(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Welcome!",
             root = True
         )
@@ -475,7 +530,7 @@ if __name__ == '__main__':
     _logger.info(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = f"Preview {'On' if preview else 'Off'}!",
             root = True
         )
@@ -486,7 +541,7 @@ if __name__ == '__main__':
     _logger.debug(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Init...",
             root = True
         )
@@ -497,7 +552,7 @@ if __name__ == '__main__':
     _logger.debug(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Init OK!",
             root = True
         )
@@ -506,7 +561,7 @@ if __name__ == '__main__':
     _logger.debug(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Start...",
             root = True
         )
@@ -517,7 +572,7 @@ if __name__ == '__main__':
     _logger.debug(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Start OK!",
             root = True
         )
@@ -533,7 +588,7 @@ if __name__ == '__main__':
     _logger.debug(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Stop...",
             root = True
         )
@@ -544,7 +599,7 @@ if __name__ == '__main__':
     _logger.debug(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Stop OK!",
             root = True
         )
@@ -553,7 +608,7 @@ if __name__ == '__main__':
     _logger.debug(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Uninit...",
             root = True
         )
@@ -564,7 +619,7 @@ if __name__ == '__main__':
     _logger.debug(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Uninit OK!",
             root = True
         )
@@ -573,7 +628,7 @@ if __name__ == '__main__':
     _logger.info(
         _format_message(
             sender = _SYSTEM,
-            action = _ACTION_EXECUTION,
+            event = _EVENT_EXECUTION,
             message = "Bye!",
             root = True
         )
