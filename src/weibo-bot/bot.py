@@ -207,7 +207,8 @@ class Bot:
                 for var_name, var_expr in vars.items():
                     evaluated_var = _safe_eval(var_expr, {
                         "envs": envs,
-                        "mods": mods
+                        "mods": mods,
+                        "vars": evaluated_vars
                     })
 
                     evaluated_vars[var_name] = evaluated_var

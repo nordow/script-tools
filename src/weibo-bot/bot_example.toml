@@ -17,6 +17,7 @@ current_timezone = { type = "expression", value = "mods['pytz'].timezone(envs['t
 
 [default.vars]
 now = "mods['datetime'].datetime.now(mods['current_timezone'])"
+week = "vars['now'].weekday()"
 
 [default.jobs.normal]
 cron = "0 0/30 * * * *"
