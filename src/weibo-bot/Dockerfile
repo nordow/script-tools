@@ -12,4 +12,4 @@ RUN bash get-chrome.sh && bash get-chromedriver.sh
 
 RUN pip install -r requirements.txt
 
-ENTRYPOINT ["python", "bot.py"]
+ENTRYPOINT ["python", "bot.py", "--real"]
