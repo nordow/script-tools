@@ -10,24 +10,31 @@ emojis = ["🤣", "🙃", "🫠"]
 
 [default.mods]
 random = "random"
+operator = "operator"
 datetime = { type = "module", value = "datetime" }
 pytz = { type = "module", value = "pytz" }
 two = { type = "expression", value = "1 + 1" }
 current_timezone = { type = "expression", value = "mods['pytz'].timezone(envs['timezone']) if envs['timezone'] is not None else None" }
+do_nothing = { type = "expression", value = "lambda: None" }
 
 [default.vars]
 now = "mods['datetime'].datetime.now(mods['current_timezone'])"
 week = "vars['now'].weekday()"
+caches = "{}"
 
 [default.jobs.normal]
 cron = "0 0/30 * * * *"
 jitter = 600
 select = "random"
+commands.pre = [
+    "mods['operator'].setitem(vars['caches'], 'random_emoji', mods['random'].choice(envs['emojis']))"
+]
+commands.post = "mods['do_nothing']()"
 templates = [
     "<1> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][0]}",
     "<2> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][1]}",
     "<3> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][2]}",
-    { text = "<4> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {mods['random'].choice(envs['emojis'])}", images = ["http://www.lenna.org/lena_std.tif"] }
+    { text = "<4> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", images = ["http://www.lenna.org/lena_std.tif"] }
 ]
 
 [default.jobs.double]

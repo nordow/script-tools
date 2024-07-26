@@ -41,7 +41,7 @@ _EVENT_EXECUTION = "Execution"
 _logger = logging.getLogger(__name__)
 
 
-def _safe_eval(expr: str, globals: dict[str, Any] | None = None, locals: dict[str, Any] | None = None) -> str:
+def _safe_eval(expr: str, globals: dict[str, Any] | None = None, locals: dict[str, Any] | None = None) -> Any:
     code = compile_restricted(expr, mode = "eval")
 
     return eval(code, {
@@ -187,20 +187,6 @@ class Bot:
 
         def send_post(driver: WebDriver, args: dict[str, Any], preview: bool) -> None:
 
-            def normalize_template(template, job_id: str) -> dict[str, Any]:
-                if isinstance(template, str):
-                    return {
-                        "text": template,
-                        "images": []
-                    }
-                elif isinstance(template, dict):
-                    return {
-                        "text": template["text"],
-                        "images": template.get("images", [])
-                    }
-                else:
-                    raise TypeError(f"Wrong type of template for [{job_id}]; got '{type(template).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
-
             def eval_vars(vars: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
                 evaluated_vars: dict[str, Any] = {}
 
@@ -215,6 +201,42 @@ class Bot:
 
                 return evaluated_vars
 
+            def execute_commands(commands: dict[str, Any] | None, group: str, kwargs: dict[str, Any] | None, job_id: str) -> None:
+
+                def normalize_commands(commands: dict[str, Any] | None, group: str, job_id: str) -> list[str] | None:
+                    if commands is None:
+                        return None
+
+                    if (group_commands := commands.get(group)) is None:
+                        return None
+
+                    if isinstance(group_commands, str):
+                        return [group_commands]
+                    elif isinstance(group_commands, list):
+                        return group_commands
+                    else:
+                        raise TypeError(f"Wrong type of {group} commands for [{job_id}]; got '{type(group_commands).__name__}', expected '{str.__name__}' or '{list.__name__}[{str.__name__}]'")
+
+                if not (group_commands := normalize_commands(commands, group, job_id)):
+                    return
+
+                for command in group_commands:
+                    _safe_eval(command, kwargs)
+
+            def normalize_template(template, job_id: str) -> dict[str, Any]:
+                if isinstance(template, str):
+                    return {
+                        "text": template,
+                        "images": []
+                    }
+                elif isinstance(template, dict):
+                    return {
+                        "text": template["text"],
+                        "images": template.get("images", [])
+                    }
+                else:
+                    raise TypeError(f"Wrong type of template for [{job_id}]; got '{type(template).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+
             def convert_url_to_path(url: str) -> tuple[str, bool]:
                 if os.path.isfile(url):
                     return (os.path.abspath(url), False)
@@ -227,8 +249,9 @@ class Bot:
             mods: dict[str, Any] = args["mods"]
             vars: dict[str, Any] = args["vars"]
 
-            select: str = args["select"]
-            templates: list[str | dict[str, Any]] = args["templates"]
+            select: str | None = args["select"]
+            commands: dict[str, Any] | None = args["commands"]
+            templates: list[str | dict[str, Any]] | None = args["templates"]
 
             if not templates:
                 raise ValueError(f"Wrong value of templates for [{job_id}]; got {templates}, expected [templates]{{1,}}")
@@ -236,7 +259,7 @@ class Bot:
             template_conf: str | dict[str, Any]
 
             match select:
-                case "random":
+                case None | "random":
                     template_conf = random.choice(templates)
                 case _:
                     raise ValueError(f"Wrong value of select for [{job_id}]; got {repr(select)}, expected 'random'")
@@ -245,14 +268,16 @@ class Bot:
             template_text = template["text"]
             template_images = template["images"]
 
-            template_kwargs = {
+            job_kwargs = {
                 "envs": envs,
                 "mods": mods,
                 "vars": eval_vars(vars, envs, mods)
             }
 
-            text = _format_fstring(template_text, **template_kwargs)
-            images = [_format_fstring(template_image, **template_kwargs) for template_image in template_images]
+            execute_commands(commands, "pre", job_kwargs, job_id)
+
+            text = _format_fstring(template_text, **job_kwargs)
+            images = [_format_fstring(template_image, **job_kwargs) for template_image in template_images]
 
             _logger.info(
                 _format_message(
@@ -265,69 +290,69 @@ class Bot:
             if not images and text.isspace():
                 raise ValueError(f"Wrong value of formatted text for [{job_id}]; got {repr(text)}, expected not whitespace, if there is no images")
 
-            if preview:
-                return
-
-            driver.execute_script("window.open('https://weibo.com', '_blank')")
-            driver.switch_to.window(driver.window_handles[-1])
-
-            try:
-                element_wait = WebDriverWait(driver, 30)
-                execution_wait = WebDriverWait(driver, 15)
-
-                text_textarea_xpath = '//div[@id="homeWrap"]/div[1]/div/div[1]/div/textarea'
-                send_button_xpath = '//div[@id="homeWrap"]/div[1]/div/div[4]/div/div[5]/button'
-
-                text_textarea: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, text_textarea_xpath)))
-                send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
-
-                # text_textarea.clear()
-                text_textarea.send_keys(Keys.CONTROL, "A")
-                text_textarea.send_keys(Keys.DELETE)
-                execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
-
-                if images:
-                    file_input_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/input'
-
-                    file_input: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, file_input_xpath.format(index = 1))))
-                    file_input_accept: str = file_input.get_attribute("accept")
-
-                    files: list[tuple[str, bool]] = []
-
-                    try:
-                        for image in images:
-                            files.append(convert_url_to_path(image))
-
-                        file_input.send_keys("\n".join((file[0] for file in files)))
-                        execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
-
-                        upload_wait = WebDriverWait(driver, 60)
-
-                        item_div_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div'
-                        cover_img_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/img'
-
-                        file_div_list: list[WebElement] = execution_wait.until(EC.presence_of_all_elements_located((By.XPATH, item_div_xpath)))[:-1]
-
-                        if (files_diff := len(files) - len(file_div_list)) > 0:
-                            raise ValueError(f"Find {files_diff} unacceptable formatted image(s) for [{job_id}]; got {repr(images)}, expected [images]{{0,18}} or [images and videos]{{0,9}}, accepted {repr(file_input_accept)}")
-
-                        for index in range(len(file_div_list)):
-                            upload_wait.until(EC.presence_of_element_located((By.XPATH, cover_img_xpath.format(index = 1 + index))))
-
-                    finally:
-                        for path in (file[0] for file in files if file[1]):
-                            _try_delete_file(path)
-
-                text_textarea.send_keys(text)
-                execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
-
-                # send_button.click()
-                driver.execute_script("arguments[0].click();", send_button)
-                execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
-
-            finally:
-                driver.close()
+            if not preview:
+                driver.execute_script("window.open('https://weibo.com', '_blank')")
                 driver.switch_to.window(driver.window_handles[-1])
+
+                try:
+                    element_wait = WebDriverWait(driver, 30)
+                    execution_wait = WebDriverWait(driver, 15)
+
+                    text_textarea_xpath = '//div[@id="homeWrap"]/div[1]/div/div[1]/div/textarea'
+                    send_button_xpath = '//div[@id="homeWrap"]/div[1]/div/div[4]/div/div[5]/button'
+
+                    text_textarea: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, text_textarea_xpath)))
+                    send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
+
+                    # text_textarea.clear()
+                    text_textarea.send_keys(Keys.CONTROL, "A")
+                    text_textarea.send_keys(Keys.DELETE)
+                    execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+                    if images:
+                        file_input_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/input'
+
+                        file_input: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, file_input_xpath.format(index = 1))))
+                        file_input_accept: str = file_input.get_attribute("accept")
+
+                        files: list[tuple[str, bool]] = []
+
+                        try:
+                            for image in images:
+                                files.append(convert_url_to_path(image))
+
+                            file_input.send_keys("\n".join((file[0] for file in files)))
+                            execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+                            upload_wait = WebDriverWait(driver, 60)
+
+                            item_div_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div'
+                            cover_img_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/img'
+
+                            file_div_list: list[WebElement] = execution_wait.until(EC.presence_of_all_elements_located((By.XPATH, item_div_xpath)))[:-1]
+
+                            if (files_diff := len(files) - len(file_div_list)) > 0:
+                                raise ValueError(f"Find {files_diff} unacceptable formatted image(s) for [{job_id}]; got {images}, expected [images]{{0,18}} or [images and videos]{{0,9}}, accepted {repr(file_input_accept)}")
+
+                            for index in range(len(file_div_list)):
+                                upload_wait.until(EC.presence_of_element_located((By.XPATH, cover_img_xpath.format(index = 1 + index))))
+
+                        finally:
+                            for path in (file[0] for file in files if file[1]):
+                                _try_delete_file(path)
+
+                    text_textarea.send_keys(text)
+                    execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+                    # send_button.click()
+                    driver.execute_script("arguments[0].click();", send_button)
+                    execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+                finally:
+                    driver.close()
+                    driver.switch_to.window(driver.window_handles[-1])
+
+            execute_commands(commands, "post", job_kwargs, job_id)
 
         conf = self.__conf
         preview = self.__preview
@@ -375,8 +400,9 @@ class Bot:
 
                 job_cron: str = job_conf["cron"]
                 job_jitter: int | None = job_conf.get("jitter")
-                job_select: str = job_conf.get("select", "random")
-                job_templates: list[str | dict[str, Any]] = job_conf.get("templates", [])
+                job_select: str | None = job_conf.get("select")
+                job_commands: dict[str, Any] | None = job_conf.get("commands")
+                job_templates: list[str | dict[str, Any]] | None = job_conf.get("templates")
 
                 scheduler.add_job(send_post, FullCronTrigger.from_cron(job_cron, timezone, job_jitter), kwargs = {
                     "args": {
@@ -387,6 +413,7 @@ class Bot:
                         "vars": vars,
 
                         "select": job_select,
+                        "commands": job_commands,
                         "templates": job_templates,
                     },
 
