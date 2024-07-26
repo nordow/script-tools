@@ -494,6 +494,17 @@ class Bot:
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("-c", "--configuration", default = "bot.toml", help = "defines the bot configuration")
+
+    preview_group = parser.add_mutually_exclusive_group()
+
+    preview_group.add_argument("-p", "--preview", action = "store_true", help = "defines whether to preview the post (default)")
+    preview_group.add_argument("-r", "--real", action = "store_true", help = "defines whether to really send the post")
+
+    args = parser.parse_args()
+
     os.makedirs("logs", exist_ok = True)
 
     config.dictConfig({
@@ -546,20 +557,13 @@ if __name__ == '__main__':
         )
     )
 
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("-c", "--configuration", default = "bot.toml", help = "defines the bot configuration")
-    parser.add_argument("-p", "--preview", action = "store_true", help = "defines whether to preview the post")
-
-    args = parser.parse_args()
-
     conf: dict[str, Any]
     preview: bool
 
     with open(args.configuration, "rb") as f:
         conf = tomllib.load(f)
 
-    preview = args.preview
+    preview = args.preview or not args.real
 
     _logger.info(
         _format_message(
