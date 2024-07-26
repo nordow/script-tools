@@ -1,3 +1,5 @@
 logs/
 
-bot.toml
+*.toml
+
+!*example.toml
