@@ -40,23 +40,23 @@ _EVENT_EXECUTION = "Execution"
 
 _logger = logging.getLogger(__name__)
 
-_safe_globals = {
-    "__builtins__": {
-        **safe_builtins,
 
-        "_getitem_": default_guarded_getitem,
-        "_getiter_": default_guarded_getiter
-    }
-}
-
-
-def _safe_eval(expr: str, **kwargs) -> str:
+def _safe_eval(expr: str, globals: dict[str, Any] | None = None, locals: dict[str, Any] | None = None) -> str:
     code = compile_restricted(expr, mode = "eval")
 
-    return eval(code, _safe_globals, kwargs)
+    return eval(code, {
+        "__builtins__": {
+            **safe_builtins,
+
+            "_getitem_": default_guarded_getitem,
+            "_getiter_": default_guarded_getiter
+        },
+
+        **(globals if globals is not None else {})
+    }, locals)
 
 def _format_fstring(fstring: str, **kwargs) -> str:
-    return _safe_eval(f'f{repr(fstring)}', **kwargs)
+    return _safe_eval(f'f{repr(fstring)}', kwargs)
 
 def _format_message(sender, event, message, root: bool = False) -> str:
     return f"{f'<{sender}>' if root else f'[{sender}]':<16} - {event:<9} | {message}"
@@ -142,7 +142,10 @@ class Bot:
                     case "module":
                         imported_mod = importlib.import_module(mod_value)
                     case "expression":
-                        imported_mod = _safe_eval(mod_value, envs = envs)
+                        imported_mod = _safe_eval(mod_value, {
+                            "envs": envs,
+                            "mods": imported_mods
+                        })
                     case _:
                         raise ValueError(f"Wrong value of type for mod '{mod_id}'; got {repr(mod_type)}, expected 'module' or 'expression'")
 
@@ -202,9 +205,12 @@ class Bot:
                 evaluated_vars: dict[str, Any] = {}
 
                 for var_name, var_expr in vars.items():
-                    var = _safe_eval(var_expr, envs = envs, mods = mods)
+                    evaluated_var = _safe_eval(var_expr, {
+                        "envs": envs,
+                        "mods": mods
+                    })
 
-                    evaluated_vars[var_name] = var
+                    evaluated_vars[var_name] = evaluated_var
 
                 return evaluated_vars
 

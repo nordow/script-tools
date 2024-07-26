@@ -13,9 +13,10 @@ random = "random"
 datetime = { type = "module", value = "datetime" }
 pytz = { type = "module", value = "pytz" }
 two = { type = "expression", value = "1 + 1" }
+current_timezone = { type = "expression", value = "mods['pytz'].timezone(envs['timezone']) if envs['timezone'] is not None else None" }
 
 [default.vars]
-now = "mods['datetime'].datetime.now(mods['pytz'].timezone(envs['timezone']) if envs['timezone'] is not None else None)"
+now = "mods['datetime'].datetime.now(mods['current_timezone'])"
 
 [default.jobs.normal]
 cron = "0 0/30 * * * *"
