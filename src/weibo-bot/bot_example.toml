@@ -49,8 +49,15 @@ templates = [
 ]
 
 [coder]
-cookies = "<coder_cookies>"
+cookies.source = "string"
+cookies.type = "header"
+cookies.value = "<coder_cookies>"
 
 [coder.envs]
 hello = "World"
 world = "Hello"
+
+[cheems]
+cookies.source = "file"
+cookies.type = "json"
+cookies.value = "<cheems_cookies_json_file>"

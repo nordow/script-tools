@@ -1,6 +1,7 @@
 import argparse
 import copy
 import importlib
+import json
 import logging
 import os
 import random
@@ -153,7 +154,59 @@ class Bot:
 
             return imported_mods
 
-        def load_page(driver: WebDriver, cookies: str) -> None:
+        def load_page(driver: WebDriver, cookies_conf: str | dict[str, Any], user_name: str) -> None:
+
+            def get_cookies(cookies_conf: str | dict[str, Any], user_name: str) -> list[dict[str, Any]]:
+
+                def normalize_cookies(cookies, user_name: str) -> dict[str, Any]:
+                    if isinstance(cookies, str):
+                        return {
+                            "source": "string",
+                            "type": "header",
+                            "value": cookies
+                        }
+                    elif isinstance(cookies, dict):
+                        return {
+                            "source": cookies.get("source"),
+                            "type": cookies["type"],
+                            "value": cookies["value"]
+                        }
+                    else:
+                        raise TypeError(f"Wrong type of cookies for user '{user_name}'; got '{type(cookies).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+
+                cookies = normalize_cookies(cookies_conf, user_name)
+                cookies_source = cookies["source"]
+                cookies_type = cookies["type"]
+                cookies_value = cookies["value"]
+
+                cookies_str: str
+
+                match cookies_source:
+                    case None | "string":
+                        cookies_str = cookies_value
+                    case "file":
+                        with open(cookies_value, "r") as f:
+                            cookies_str = f.read()
+                    case _:
+                        raise ValueError(f"Wrong value of cookies source for user '{user_name}'; got {repr(cookies_source)}, expected 'string' or 'file'")
+
+                match cookies_type:
+                    case None | "header":
+                        return [{
+                            "domain": ".weibo.com",
+                            "name": key,
+                            "value": morsel.value,
+                            "expires": "",
+                            "path": "/",
+                            "httpOnly": False,
+                            "hostOnly": False,
+                            "secure": False
+                        } for key, morsel in SimpleCookie(cookies_str).items()]
+                    case "json":
+                        return json.loads(cookies_str)
+                    case _:
+                        raise ValueError(f"Wrong value of cookies type for user '{user_name}'; got {repr(cookies_type)}, expected 'header' or 'json'")
+
             app_xpath = '//div[@id="app"]'
 
             driver.get("https://weibo.com")
@@ -162,18 +215,7 @@ class Bot:
 
             loading_wait.until(EC.presence_of_element_located((By.XPATH, app_xpath)))
 
-            for key, morsel in SimpleCookie(cookies).items():
-                cookie = {
-                    "domain": ".weibo.com",
-                    "name": key,
-                    "value": morsel.value,
-                    "expires": "",
-                    "path": "/",
-                    "httpOnly": False,
-                    "HostOnly": False,
-                    "Secure": False
-                }
-
+            for cookie in get_cookies(cookies_conf, user_name):
                 driver.add_cookie(cookie)
 
             home_wrap_xpath = '//div[@id="homeWrap"]'
@@ -362,7 +404,7 @@ class Bot:
 
         for user_name, user_conf in conf.items():
             timezone: str | None = user_conf.get("timezone", conf["default"].get("timezone"))
-            cookies: str = user_conf.get("cookies", conf["default"]["cookies"])
+            cookies_conf: str | dict[str, Any] = user_conf.get("cookies", conf["default"]["cookies"])
             envs: dict[str, Any] = copy.deepcopy({
                 **(conf["default"].get("envs", {})),
                 **(user_conf.get("envs", {}))
@@ -396,7 +438,7 @@ class Bot:
 
                 driver.maximize_window()
 
-                load_page(driver, cookies)
+                load_page(driver, cookies_conf, user_name)
 
                 drivers[job_name] = driver
 
