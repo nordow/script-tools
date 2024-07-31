@@ -10,6 +10,6 @@ COPY . .
 RUN apt-get -y update && apt-get -y install wget unzip
 RUN bash get-chrome.sh && bash get-chromedriver.sh
 
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 ENTRYPOINT ["python", "bot.py", "--real"]
