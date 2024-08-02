@@ -1,15 +1,20 @@
 FROM python:3.11.5-slim-bookworm
 
-ENV TZ="Asia/Shanghai"
-ENV CHROME_VERSION="126.0.6478.126"
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        chromium \
+        chromium-driver \
+    ; \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY . .
 
-RUN apt-get -y update && apt-get -y install wget unzip
-RUN bash get-chrome.sh && bash get-chromedriver.sh
+RUN set -eux; \
+    pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir -r requirements.txt
+ENV TZ="Asia/Shanghai"
 
 ENTRYPOINT ["python", "bot.py", "--real"]

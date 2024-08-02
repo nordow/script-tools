@@ -1,0 +1,13 @@
+FROM python:3.11.5-slim-bookworm
+
+ENV TZ="Asia/Shanghai"
+ENV CHROME_VERSION="126.0.6478.126"
+
+WORKDIR /tmp
+
+COPY get-chrome.sh          \
+     get-chromedriver.sh    \
+     ./
+
+RUN apt-get -y update && apt-get -y install wget unzip
+RUN bash get-chrome.sh && bash get-chromedriver.sh
