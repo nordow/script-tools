@@ -320,7 +320,7 @@ class Bot:
                 template_images = template["images"]
 
                 text = _format_fstring(template_text, **job_kwargs)
-                images = [_format_fstring(template_image, **job_kwargs) for template_image in template_images]
+                images = [_format_fstring(template_image, **job_kwargs) for template_image in template_images] if isinstance(template_images, list) else [template_image for template_image in _safe_eval(template_images, job_kwargs)]
 
                 _logger.info(
                     _format_message(

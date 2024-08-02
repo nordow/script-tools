@@ -45,7 +45,7 @@ templates = [
     "[1] Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][0]}",
     "[2] Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][1]}",
     "[3] Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][2]}",
-    { text = "[4] Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {mods['random'].choice(envs['emojis'])}", images = ["http://www.lenna.org/lena_std.tif"] }
+    { text = "[4] Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {mods['random'].choice(envs['emojis'])}", images = "['http://www.lenna.org/lena_std.tif']" }
 ]
 
 [coder]
