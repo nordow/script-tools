@@ -196,7 +196,7 @@ class Bot:
                             "domain": ".weibo.com",
                             "name": key,
                             "value": morsel.value,
-                            "expires": "",
+                            # "expiry": null,
                             "path": "/",
                             "httpOnly": False,
                             "hostOnly": False,
@@ -216,6 +216,9 @@ class Bot:
             loading_wait.until(EC.presence_of_element_located((By.XPATH, app_xpath)))
 
             for cookie in get_cookies(cookies_conf, user_name):
+                if isinstance(cookie.get("expiry"), float):
+                    cookie["expiry"] = int(cookie["expiry"])
+
                 driver.add_cookie(cookie)
 
             home_wrap_xpath = '//div[@id="homeWrap"]'
