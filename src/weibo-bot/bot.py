@@ -392,8 +392,8 @@ class Poster:
         text: str | None = kwargs.get("text")
         images: list[str] | None = kwargs.get("images")
 
-        if not images and text.isspace():
-            raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not whitespace, if there is no images")
+        if not images and (not text or text.isspace()):
+            raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace, if there is no images")
 
         driver = self.__driver
         preview = self.__preview
