@@ -9,6 +9,7 @@ import signal
 import sys
 import tomllib
 import urllib.request
+from collections.abc import Callable
 from http.cookies import SimpleCookie
 from logging import config
 from threading import Event
@@ -91,12 +92,396 @@ class FullCronTrigger(CronTrigger):
                 raise ValueError(f"Wrong number of fields; got {len(values)}, expected 5 or 6 or 7")
 
 
+class Validator:
+    __id: str
+
+    def __init__(self, id: str) -> None:
+        self.__id = id
+
+    @property
+    def id(self) -> str:
+        return self.__id
+
+    def validate(self, value) -> Any:
+        pass
+
+
+class CookieValidator(Validator):
+
+    def __init__(self, id: str) -> None:
+        super().__init__(id)
+
+    def validate(self, value) -> dict[str, Any]:
+        if isinstance(value, str):
+            return {
+                "source": "string",
+                "type": "header",
+                "value": value
+            }
+        elif isinstance(value, dict):
+            return {
+                "source": value.get("source"),
+                "type": value["type"],
+                "value": value["value"]
+            }
+        else:
+            raise TypeError(f"Wrong type of cookies @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+
+
+class ModValidator(Validator):
+
+    def __init__(self, id: str) -> None:
+        super().__init__(id)
+
+    def validate(self, value) -> dict[str, Any]:
+        if isinstance(value, str):
+            return {
+                "type": "module",
+                "value": value
+            }
+        elif isinstance(value, dict):
+            return {
+                "type": value["type"],
+                "value": value["value"]
+            }
+        else:
+            raise TypeError(f"Wrong type of mod @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+
+
+class CommandValidator(Validator):
+
+    def __init__(self, id: str) -> None:
+        super().__init__(id)
+
+    def validate(self, value) -> list[str] | None:
+        (commands, group) = value
+
+        if commands is None:
+            return None
+
+        if (group_commands := commands.get(group)) is None:
+            return None
+
+        if isinstance(group_commands, str):
+            return [group_commands]
+        elif isinstance(group_commands, list):
+            return group_commands
+        else:
+            raise TypeError(f"Wrong type of {group} commands @{self.id}; got '{type(group_commands).__name__}', expected '{str.__name__}' or '{list.__name__}[{str.__name__}]'")
+
+
+class TemplateValidator(Validator):
+
+    def __init__(self, id: str) -> None:
+        super().__init__(id)
+
+    def validate(self, value) -> dict[str, Any]:
+        if isinstance(value, str):
+            return {
+                "text": value,
+                "images": []
+            }
+        elif isinstance(value, dict):
+            return {
+                "text": value["text"],
+                "images": value.get("images", [])
+            }
+        else:
+            raise TypeError(f"Wrong type of template @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+
+
+class CookieParser:
+    __id: str
+
+    def __init__(self, id: str) -> None:
+        self.__id = id
+
+    @property
+    def id(self) -> str:
+        return self.__id
+
+    def parse(self, value: str, type: str | None = None, source: str | None = None) -> list[dict[str, Any]]:
+        cookies_str: str
+
+        match source:
+            case None | "string":
+                cookies_str = value
+            case "file":
+                with open(value, "r") as f:
+                    cookies_str = f.read()
+            case _:
+                raise ValueError(f"Wrong value of cookies source @{self.id}; got {repr(source)}, expected 'string' or 'file'")
+
+        cookies: list[dict[str, Any]]
+
+        match type:
+            case None | "header":
+                cookies = [{
+                    "domain": ".weibo.com",
+                    "name": key,
+                    "value": morsel.value,
+                    # "expiry": null,
+                    "path": "/",
+                    "httpOnly": False,
+                    "hostOnly": False,
+                    "secure": False
+                } for key, morsel in SimpleCookie(cookies_str).items()]
+            case "json":
+                cookies = json.loads(cookies_str)
+            case _:
+                raise ValueError(f"Wrong value of cookies type @{self.id}; got {repr(type)}, expected 'header' or 'json'")
+
+        for cookie in cookies:
+            if isinstance(cookie.get("expiry"), float):
+                cookie["expiry"] = int(cookie["expiry"])
+
+        return cookies
+
+
+class ModImporter:
+    __id: str
+
+    def __init__(self, id: str) -> None:
+        self.__id = id
+
+    @property
+    def id(self) -> str:
+        return self.__id
+
+    def import_single(self, value: str, type: str | None = None, context: Callable[[], dict[str, Any]] | dict[str, Any] | None = None) -> Any:
+        if callable(context):
+            context = context()
+
+        mod: Any
+
+        match type:
+            case None | "module":
+                mod = importlib.import_module(value)
+            case "expression":
+                mod = _safe_eval(value, context)
+            case _:
+                raise ValueError(f"Wrong value of type @{self.id}; got {repr(type)}, expected 'module' or 'expression'")
+
+        return mod
+
+    def import_multi(self, items: dict[str, dict[str, Any]], context: Callable[[dict[str, Any]], dict[str, Any]] | dict[str, Any] | None = None) -> dict[str, Any]:
+        mods: dict[str, Any] = {}
+
+        if callable(context):
+            context = context(mods)
+
+        for name, item in items.items():
+            type: str = item.get("type")
+            value: str = item["value"]
+
+            mod: Any
+
+            match type:
+                case None | "module":
+                    mod = importlib.import_module(value)
+                case "expression":
+                    mod = _safe_eval(value, context)
+                case _:
+                    raise ValueError(f"Wrong value of type for mod {repr(name)} @{self.id}; got {repr(type)}, expected 'module' or 'expression'")
+
+            mods[name] = mod
+
+        return mods
+
+
+class TemplateSelector:
+    __id: str
+
+    def __init__(self, id: str) -> None:
+        self.__id = id
+
+    @property
+    def id(self) -> str:
+        return self.__id
+
+    def select(self, templates, mode: str | None = None) -> Any:
+        if not templates:
+            raise ValueError(f"Wrong value of select templates @{self.id}; got {repr(templates)}, expected [templates]{{1,}}")
+
+        template: Any
+
+        match mode:
+            case None | "random":
+                template = random.choice(templates)
+            case _:
+                raise ValueError(f"Wrong value of select mode @{self.id}; got {repr(mode)}, expected 'random'")
+
+        return template
+
+
+class Poster:
+    __id: str
+    __driver: WebDriver
+    __preview: bool
+
+    def __init__(self, id: str) -> None:
+        self.__id = id
+        self.__preview = False
+
+        options = webdriver.ChromeOptions()
+
+        options.add_argument("--no-sandbox")
+        options.add_argument("--headless")
+        options.add_argument("--incognito")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument(f"--user-data-dir={os.path.expanduser('~/.config/google-chrome')}")
+        options.add_argument(f"--profile-directory={id}")
+
+        driver = webdriver.Chrome(options = options)
+
+        driver.maximize_window()
+
+        self.__driver = driver
+
+    @property
+    def id(self) -> str:
+        return self.__id
+
+    @property
+    def preview(self) -> bool:
+        return self.__preview
+
+    @preview.setter
+    def preview(self, value: bool) -> None:
+        self.__preview = value
+
+    def with_preview(self, value: bool):
+        self.preview = value
+
+        return self
+
+    def with_cookies(self, value: list[dict[str, Any]]):
+        driver = self.__driver
+
+        app_xpath = '//div[@id="app"]'
+
+        current = driver.current_window_handle
+        current_index = driver.window_handles.index(current)
+
+        driver.execute_script("window.open('https://weibo.com', '_blank')")
+        driver.switch_to.window(driver.window_handles[current_index + 1])
+
+        try:
+            loading_wait = WebDriverWait(driver, 30)
+
+            loading_wait.until(EC.presence_of_element_located((By.XPATH, app_xpath)))
+
+            driver.delete_all_cookies()
+
+            for cookie in value:
+                driver.add_cookie(cookie)
+
+            home_wrap_xpath = '//div[@id="homeWrap"]'
+
+            driver.refresh()
+            loading_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
+        
+        finally:
+            driver.close()
+            driver.switch_to.window(current)
+
+        return self
+
+    def send(self, **kwargs) -> None:
+        text: str | None = kwargs.get("text")
+        images: list[str] | None = kwargs.get("images")
+
+        if not images and text.isspace():
+            raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not whitespace, if there is no images")
+
+        driver = self.__driver
+        preview = self.__preview
+
+        if preview:
+            return
+
+        current = driver.current_window_handle
+        current_index = driver.window_handles.index(current)
+
+        driver.execute_script("window.open('https://weibo.com', '_blank')")
+        driver.switch_to.window(driver.window_handles[current_index + 1])
+
+        try:
+            element_wait = WebDriverWait(driver, 30)
+            execution_wait = WebDriverWait(driver, 15)
+
+            text_textarea_xpath = '//div[@id="homeWrap"]/div[1]/div/div[1]/div/textarea'
+            send_button_xpath = '//div[@id="homeWrap"]/div[1]/div/div[4]/div/div[5]/button'
+
+            text_textarea: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, text_textarea_xpath)))
+            send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
+
+            # text_textarea.clear()
+            text_textarea.send_keys(Keys.CONTROL, "A")
+            text_textarea.send_keys(Keys.DELETE)
+            execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+            if images:
+                file_input_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/input'
+
+                file_input: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, file_input_xpath.format(index = 1))))
+                file_input_accept: str = file_input.get_attribute("accept")
+
+                files: list[tuple[str, bool]] = []
+
+                try:
+                    for image in images:
+                        files.append((os.path.abspath(image), False) if os.path.isfile(image) else (urllib.request.urlretrieve(image)[0], True))
+
+                    file_input.send_keys("\n".join((file[0] for file in files)))
+                    execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+                    upload_wait = WebDriverWait(driver, 60)
+
+                    item_div_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div'
+                    cover_img_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/img'
+
+                    file_div_list: list[WebElement] = execution_wait.until(EC.presence_of_all_elements_located((By.XPATH, item_div_xpath)))[:-1]
+
+                    if (files_diff := len(files) - len(file_div_list)) > 0:
+                        raise ValueError(f"Find {files_diff} unacceptable image(s) @{self.id}; got {images}, expected [images]{{0,18}} or [images and videos]{{0,9}}, accepted {repr(file_input_accept)}")
+
+                    for index in range(len(file_div_list)):
+                        upload_wait.until(EC.presence_of_element_located((By.XPATH, cover_img_xpath.format(index = 1 + index))))
+
+                finally:
+                    for path in (file[0] for file in files if file[1]):
+                        _try_delete_file(path)
+
+            text_textarea.send_keys(text)
+            execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+            # send_button.click()
+            driver.execute_script("arguments[0].click();", send_button)
+            execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+        finally:
+            driver.close()
+            driver.switch_to.window(current)
+
+    def dispose(self) -> None:
+        driver = self.__driver
+
+        if driver is None:
+            return
+
+        driver.quit()
+
+        self.__driver = None
+
+
 class User:
-    drivers: dict[str, WebDriver]
+    posters: dict[str, Poster]
     scheduler: BaseScheduler
 
-    def __init__(self, drivers: dict[str, WebDriver], scheduler: BaseScheduler) -> None:
-        self.drivers = drivers
+    def __init__(self, posters: dict[str, Poster], scheduler: BaseScheduler) -> None:
+        self.posters = posters
         self.scheduler = scheduler
 
 
@@ -112,125 +497,7 @@ class Bot:
 
     def init(self) -> None:
 
-        def import_mods(mods: dict[str, Any], envs: dict[str, Any], user_name: str) -> dict[str, Any]:
-
-            def normalize_mod(mod, mod_id: str) -> dict[str, Any]:
-                if isinstance(mod, str):
-                    return {
-                        "type": "module",
-                        "value": mod
-                    }
-                elif isinstance(mod, dict):
-                    return {
-                        "type": mod["type"],
-                        "value": mod["value"]
-                    }
-                else:
-                    raise TypeError(f"Wrong type of mod '{mod_id}'; got '{type(mod).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
-
-            imported_mods: dict[str, Any] = {}
-
-            for mod_name, mod_conf in mods.items():
-                mod_id = f"{user_name}.{mod_name}"
-
-                mod = normalize_mod(mod_conf, mod_id)
-                mod_type: str = mod["type"]
-                mod_value: str = mod["value"]
-
-                imported_mod: Any
-
-                match mod_type:
-                    case "module":
-                        imported_mod = importlib.import_module(mod_value)
-                    case "expression":
-                        imported_mod = _safe_eval(mod_value, {
-                            "envs": envs,
-                            "mods": imported_mods
-                        })
-                    case _:
-                        raise ValueError(f"Wrong value of type for mod '{mod_id}'; got {repr(mod_type)}, expected 'module' or 'expression'")
-
-                imported_mods[mod_name] = imported_mod
-
-            return imported_mods
-
-        def load_page(driver: WebDriver, cookies_conf: str | dict[str, Any], user_name: str) -> None:
-
-            def get_cookies(cookies_conf: str | dict[str, Any], user_name: str) -> list[dict[str, Any]]:
-
-                def normalize_cookies(cookies, user_name: str) -> dict[str, Any]:
-                    if isinstance(cookies, str):
-                        return {
-                            "source": "string",
-                            "type": "header",
-                            "value": cookies
-                        }
-                    elif isinstance(cookies, dict):
-                        return {
-                            "source": cookies.get("source"),
-                            "type": cookies["type"],
-                            "value": cookies["value"]
-                        }
-                    else:
-                        raise TypeError(f"Wrong type of cookies for user '{user_name}'; got '{type(cookies).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
-
-                cookies = normalize_cookies(cookies_conf, user_name)
-                cookies_source = cookies["source"]
-                cookies_type = cookies["type"]
-                cookies_value = cookies["value"]
-
-                cookies_str: str
-
-                match cookies_source:
-                    case None | "string":
-                        cookies_str = cookies_value
-                    case "file":
-                        with open(cookies_value, "r") as f:
-                            cookies_str = f.read()
-                    case _:
-                        raise ValueError(f"Wrong value of cookies source for user '{user_name}'; got {repr(cookies_source)}, expected 'string' or 'file'")
-
-                match cookies_type:
-                    case None | "header":
-                        return [{
-                            "domain": ".weibo.com",
-                            "name": key,
-                            "value": morsel.value,
-                            # "expiry": null,
-                            "path": "/",
-                            "httpOnly": False,
-                            "hostOnly": False,
-                            "secure": False
-                        } for key, morsel in SimpleCookie(cookies_str).items()]
-                    case "json":
-                        return json.loads(cookies_str)
-                    case _:
-                        raise ValueError(f"Wrong value of cookies type for user '{user_name}'; got {repr(cookies_type)}, expected 'header' or 'json'")
-
-            app_xpath = '//div[@id="app"]'
-
-            driver.get("https://weibo.com")
-
-            loading_wait = WebDriverWait(driver, 30)
-
-            loading_wait.until(EC.presence_of_element_located((By.XPATH, app_xpath)))
-
-            for cookie in get_cookies(cookies_conf, user_name):
-                if isinstance(cookie.get("expiry"), float):
-                    cookie["expiry"] = int(cookie["expiry"])
-
-                driver.add_cookie(cookie)
-
-            home_wrap_xpath = '//div[@id="homeWrap"]'
-
-            driver.refresh()
-            loading_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
-
-            driver.execute_script("window.open('', '_blank')")
-            driver.close()
-            driver.switch_to.window(driver.window_handles[-1])
-
-        def send_post(driver: WebDriver, args: dict[str, Any], preview: bool) -> None:
+        def send_post(poster: Poster, kwargs: dict[str, Any]) -> None:
 
             def eval_vars(vars: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
                 evaluated_vars: dict[str, Any] = {}
@@ -247,56 +514,21 @@ class Bot:
                 return evaluated_vars
 
             def execute_commands(commands: dict[str, Any] | None, group: str, kwargs: dict[str, Any] | None, job_id: str) -> None:
-
-                def normalize_commands(commands: dict[str, Any] | None, group: str, job_id: str) -> list[str] | None:
-                    if commands is None:
-                        return None
-
-                    if (group_commands := commands.get(group)) is None:
-                        return None
-
-                    if isinstance(group_commands, str):
-                        return [group_commands]
-                    elif isinstance(group_commands, list):
-                        return group_commands
-                    else:
-                        raise TypeError(f"Wrong type of {group} commands for [{job_id}]; got '{type(group_commands).__name__}', expected '{str.__name__}' or '{list.__name__}[{str.__name__}]'")
-
-                if not (group_commands := normalize_commands(commands, group, job_id)):
+                if not (group_commands := CommandValidator(job_id).validate((commands, group))):
                     return
 
                 for command in group_commands:
                     _safe_eval(command, kwargs)
 
-            def normalize_template(template, job_id: str) -> dict[str, Any]:
-                if isinstance(template, str):
-                    return {
-                        "text": template,
-                        "images": []
-                    }
-                elif isinstance(template, dict):
-                    return {
-                        "text": template["text"],
-                        "images": template.get("images", [])
-                    }
-                else:
-                    raise TypeError(f"Wrong type of template for [{job_id}]; got '{type(template).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+            job_id: str = poster.id
 
-            def convert_url_to_path(url: str) -> tuple[str, bool]:
-                if os.path.isfile(url):
-                    return (os.path.abspath(url), False)
+            envs: dict[str, Any] = kwargs["envs"]
+            mods: dict[str, Any] = kwargs["mods"]
+            vars: dict[str, Any] = kwargs["vars"]
 
-                return (urllib.request.urlretrieve(url)[0], True)
-
-            job_id: str = args["job_id"]
-
-            envs: dict[str, Any] = args["envs"]
-            mods: dict[str, Any] = args["mods"]
-            vars: dict[str, Any] = args["vars"]
-
-            select: str | None = args["select"]
-            commands: dict[str, Any] | None = args["commands"]
-            templates: list[str | dict[str, Any]] | None = args["templates"]
+            select: str | None = kwargs["select"]
+            commands: dict[str, Any] | None = kwargs["commands"]
+            templates: list[dict[str, Any] | str] | None = kwargs["templates"]
 
             job_kwargs = {
                 "envs": envs,
@@ -307,18 +539,9 @@ class Bot:
             try:
                 execute_commands(commands, "pre", job_kwargs, job_id)
 
-                if not templates:
-                    raise ValueError(f"Wrong value of templates for [{job_id}]; got {templates}, expected [templates]{{1,}}")
+                template_conf = TemplateSelector(job_id).select(templates, select)
 
-                template_conf: str | dict[str, Any]
-
-                match select:
-                    case None | "random":
-                        template_conf = random.choice(templates)
-                    case _:
-                        raise ValueError(f"Wrong value of select for [{job_id}]; got {repr(select)}, expected 'random'")
-
-                template = normalize_template(template_conf, job_id)
+                template = TemplateValidator(job_id).validate(template_conf)
                 template_text = template["text"]
                 template_images = template["images"]
 
@@ -333,70 +556,7 @@ class Bot:
                     )
                 )
 
-                if not images and text.isspace():
-                    raise ValueError(f"Wrong value of formatted text for [{job_id}]; got {repr(text)}, expected not whitespace, if there is no images")
-
-                if not preview:
-                    driver.execute_script("window.open('https://weibo.com', '_blank')")
-                    driver.switch_to.window(driver.window_handles[-1])
-
-                    try:
-                        element_wait = WebDriverWait(driver, 30)
-                        execution_wait = WebDriverWait(driver, 15)
-
-                        text_textarea_xpath = '//div[@id="homeWrap"]/div[1]/div/div[1]/div/textarea'
-                        send_button_xpath = '//div[@id="homeWrap"]/div[1]/div/div[4]/div/div[5]/button'
-
-                        text_textarea: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, text_textarea_xpath)))
-                        send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
-
-                        # text_textarea.clear()
-                        text_textarea.send_keys(Keys.CONTROL, "A")
-                        text_textarea.send_keys(Keys.DELETE)
-                        execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
-
-                        if images:
-                            file_input_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/input'
-
-                            file_input: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, file_input_xpath.format(index = 1))))
-                            file_input_accept: str = file_input.get_attribute("accept")
-
-                            files: list[tuple[str, bool]] = []
-
-                            try:
-                                for image in images:
-                                    files.append(convert_url_to_path(image))
-
-                                file_input.send_keys("\n".join((file[0] for file in files)))
-                                execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
-
-                                upload_wait = WebDriverWait(driver, 60)
-
-                                item_div_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div'
-                                cover_img_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/img'
-
-                                file_div_list: list[WebElement] = execution_wait.until(EC.presence_of_all_elements_located((By.XPATH, item_div_xpath)))[:-1]
-
-                                if (files_diff := len(files) - len(file_div_list)) > 0:
-                                    raise ValueError(f"Find {files_diff} unacceptable formatted image(s) for [{job_id}]; got {images}, expected [images]{{0,18}} or [images and videos]{{0,9}}, accepted {repr(file_input_accept)}")
-
-                                for index in range(len(file_div_list)):
-                                    upload_wait.until(EC.presence_of_element_located((By.XPATH, cover_img_xpath.format(index = 1 + index))))
-
-                            finally:
-                                for path in (file[0] for file in files if file[1]):
-                                    _try_delete_file(path)
-
-                        text_textarea.send_keys(text)
-                        execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
-
-                        # send_button.click()
-                        driver.execute_script("arguments[0].click();", send_button)
-                        execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
-
-                    finally:
-                        driver.close()
-                        driver.switch_to.window(driver.window_handles[-1])
+                poster.send(text = text, images = images)
 
             finally:
                 execute_commands(commands, "post", job_kwargs, job_id)
@@ -407,54 +567,38 @@ class Bot:
 
         for user_name, user_conf in conf.items():
             timezone: str | None = user_conf.get("timezone", conf["default"].get("timezone"))
-            cookies_conf: str | dict[str, Any] = user_conf.get("cookies", conf["default"]["cookies"])
+            cookies: list[dict[str, Any]] = CookieParser(user_name).parse(**(CookieValidator(user_name).validate(user_conf.get("cookies", conf["default"]["cookies"]))))
             envs: dict[str, Any] = copy.deepcopy({
                 **(conf["default"].get("envs", {})),
                 **(user_conf.get("envs", {}))
             })
-            mods: dict[str, Any] = import_mods({
+            mods: dict[str, Any] = ModImporter(user_name).import_multi({key: ModValidator(f"{user_name}.{key}").validate(value) for key, value in {
                 **(conf["default"].get("mods", {})),
                 **(user_conf.get("mods", {}))
-            }, envs, user_name)
+            }.items()}, lambda mods: { "envs": envs, "mods": mods })
             vars: dict[str, Any] = copy.deepcopy({
                 **(conf["default"].get("vars", {})),
                 **(user_conf.get("vars", {}))
             })
             jobs: dict[str, dict[str, Any]] = user_conf.get("jobs", conf["default"].get("jobs", {}))
-            drivers: dict[str, WebDriver] = {}
+            posters: dict[str, Poster] = {}
             scheduler = BackgroundScheduler()
 
             for job_name, job_conf in jobs.items():
                 job_id = f"{user_name}.{job_name}"
 
-                options = webdriver.ChromeOptions()
+                poster = Poster(job_id).with_preview(preview).with_cookies(cookies)
 
-                options.add_argument("--no-sandbox")
-                options.add_argument("--headless")
-                options.add_argument("--incognito")
-                options.add_argument("--disable-gpu")
-                options.add_argument("--disable-dev-shm-usage")
-                options.add_argument(f"--user-data-dir={os.path.expanduser('~/.config/google-chrome')}")
-                options.add_argument(f"--profile-directory={job_id}")
-
-                driver = webdriver.Chrome(options = options)
-
-                driver.maximize_window()
-
-                load_page(driver, cookies_conf, user_name)
-
-                drivers[job_name] = driver
+                posters[job_name] = poster
 
                 job_cron: str = job_conf["cron"]
                 job_jitter: int | None = job_conf.get("jitter")
                 job_select: str | None = job_conf.get("select")
                 job_commands: dict[str, Any] | None = job_conf.get("commands")
-                job_templates: list[str | dict[str, Any]] | None = job_conf.get("templates")
+                job_templates: list[dict[str, Any] | str] | None = job_conf.get("templates")
 
                 scheduler.add_job(send_post, FullCronTrigger.from_cron(job_cron, timezone, job_jitter), kwargs = {
-                    "args": {
-                        "job_id": job_id,
-
+                    "kwargs": {
                         "envs": envs,
                         "mods": mods,
                         "vars": vars,
@@ -464,8 +608,7 @@ class Bot:
                         "templates": job_templates,
                     },
 
-                    "preview": preview,
-                    "driver": driver
+                    "poster": poster
                 }, id = job_id)
 
             scheduler.add_listener(
@@ -509,7 +652,7 @@ class Bot:
                 events.EVENT_JOB_ERROR
             )
 
-            users[user_name] = User(drivers, scheduler)
+            users[user_name] = User(posters, scheduler)
 
         for user in users.values():
             user.scheduler.start(paused = True)
@@ -534,8 +677,8 @@ class Bot:
         for user in users.values():
             user.scheduler.shutdown(wait = False)
 
-            for driver in user.drivers.values():
-                driver.quit()
+            for poster in user.posters.values():
+                poster.dispose()
 
         self.__users = None
 
