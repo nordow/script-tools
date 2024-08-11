@@ -38,6 +38,7 @@ _SYSTEM = "System"
 
 _EVENT_PROCESS = "Process"
 _EVENT_EXECUTION = "Execution"
+_EVENT_NOTIFICATION = "Notification"
 
 
 _logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def _format_fstring(fstring: str, **kwargs) -> str:
     return _safe_eval(f'f{repr(fstring)}', kwargs)
 
 def _format_message(sender, event, message, root: bool = False) -> str:
-    return f"{f'<{sender}>' if root else f'[{sender}]':<16} - {event:<9} | {message}"
+    return f"{f'<{sender}>' if root else f'[{sender}]':<16} - {event:<12} | {message}"
 
 def _try_delete_file(path: str) -> bool:
     try:
@@ -612,43 +613,67 @@ class Bot:
                 }, id = job_id)
 
             scheduler.add_listener(
-                lambda event: _logger.info(
+                lambda event: (_logger.info(
                     _format_message(
                         sender = event.job_id,
                         event = _EVENT_EXECUTION,
                         message = "Success!"
                     )
-                ),
+                ), _logger.info(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_NOTIFICATION,
+                        message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
+                    )
+                )),
                 events.EVENT_JOB_EXECUTED
             )
             scheduler.add_listener(
-                lambda event: _logger.warning(
+                lambda event: (_logger.warning(
                     _format_message(
                         sender = event.job_id,
                         event = _EVENT_EXECUTION,
                         message = f"The job scheduled for '{event.scheduled_run_time:%Y-%m-%d %H:%M:%S}' has missed!"
                     )
-                ),
+                ), _logger.info(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_NOTIFICATION,
+                        message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
+                    )
+                )),
                 events.EVENT_JOB_MISSED
             )
             scheduler.add_listener(
-                lambda event: _logger.warning(
+                lambda event: (_logger.warning(
                     _format_message(
                         sender = event.job_id,
                         event = _EVENT_EXECUTION,
                         message = f"The job scheduled for {[f'{scheduled_run_time:%Y-%m-%d %H:%M:%S}' for scheduled_run_time in event.scheduled_run_times]} has skipped!"
                     )
-                ),
+                ), _logger.info(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_NOTIFICATION,
+                        message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
+                    )
+                )),
                 events.EVENT_JOB_MAX_INSTANCES
             )
             scheduler.add_listener(
-                lambda event: _logger.error(
+                lambda event: (_logger.error(
                     _format_message(
                         sender = event.job_id,
                         event = _EVENT_EXECUTION,
                         message = f"Oops, an error occurred! -> {repr(event.exception)}"
                     )
-                ),
+                ), _logger.info(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_NOTIFICATION,
+                        message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
+                    )
+                )),
                 events.EVENT_JOB_ERROR
             )
 
