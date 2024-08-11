@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import random
+import re
 import signal
 import sys
 import tomllib
@@ -107,6 +108,18 @@ class Validator:
         pass
 
 
+class UserNameValidator(Validator):
+
+    def __init__(self, id: str) -> None:
+        super().__init__(id)
+
+    def validate(self, value) -> str:
+        if re.search(r"^[A-Za-z0-9_-]+$", value):
+            return value
+        else:
+            raise ValueError(f"Wrong value of user name @{self.id}; got {repr(value)}, expected ^[A-Za-z0-9_-]+$")
+
+
 class CookieValidator(Validator):
 
     def __init__(self, id: str) -> None:
@@ -147,6 +160,18 @@ class ModValidator(Validator):
             }
         else:
             raise TypeError(f"Wrong type of mod @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+
+
+class JobNameValidator(Validator):
+
+    def __init__(self, id: str) -> None:
+        super().__init__(id)
+
+    def validate(self, value) -> str:
+        if re.search(r"^[A-Za-z0-9_-]+$", value):
+            return value
+        else:
+            raise ValueError(f"Wrong value of job name @{self.id}; got {repr(value)}, expected ^[A-Za-z0-9_-]+$")
 
 
 class CommandValidator(Validator):
@@ -382,7 +407,7 @@ class Poster:
 
             driver.refresh()
             loading_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
-        
+
         finally:
             driver.close()
             driver.switch_to.window(current)
@@ -567,6 +592,8 @@ class Bot:
         users: dict[str, User] = {}
 
         for user_name, user_conf in conf.items():
+            UserNameValidator(user_name).validate(user_name)
+
             timezone: str | None = user_conf.get("timezone", conf["default"].get("timezone"))
             cookies: list[dict[str, Any]] = CookieParser(user_name).parse(**(CookieValidator(user_name).validate(user_conf.get("cookies", conf["default"]["cookies"]))))
             envs: dict[str, Any] = copy.deepcopy({
@@ -586,6 +613,8 @@ class Bot:
             scheduler = BackgroundScheduler()
 
             for job_name, job_conf in jobs.items():
+                JobNameValidator(user_name).validate(job_name)
+
                 job_id = f"{user_name}.{job_name}"
 
                 poster = Poster(job_id).with_preview(preview).with_cookies(cookies)
