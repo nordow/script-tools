@@ -94,6 +94,10 @@ class FullCronTrigger(CronTrigger):
                 raise ValueError(f"Wrong number of fields; got {len(values)}, expected 5 or 6 or 7")
 
 
+class PreviewException(Exception):
+    pass
+
+
 class Validator:
     __id: str
 
@@ -425,7 +429,7 @@ class Poster:
         preview = self.__preview
 
         if preview:
-            return
+            raise PreviewException(f"Preview over @{self.id}")
 
         current = driver.current_window_handle
         current_index = driver.window_handles.index(current)
@@ -523,7 +527,7 @@ class Bot:
 
     def init(self) -> None:
 
-        def send_post(poster: Poster, kwargs: dict[str, Any]) -> None:
+        def send_post(poster: Poster, kwargs: dict[str, Any]) -> bool:
 
             def eval_vars(vars: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
                 evaluated_vars: dict[str, Any] = {}
@@ -582,7 +586,12 @@ class Bot:
                     )
                 )
 
-                poster.send(text = text, images = images)
+                try:
+                    poster.send(text = text, images = images)
+                except PreviewException:
+                    return False
+                else:
+                    return True
 
             finally:
                 execute_commands(commands, "post", job_kwargs, job_id)
@@ -646,7 +655,7 @@ class Bot:
                     _format_message(
                         sender = event.job_id,
                         event = _EVENT_EXECUTION,
-                        message = "Success!"
+                        message = "Success!" if event.retval else "Preview over!"
                     )
                 ), _logger.info(
                     _format_message(
