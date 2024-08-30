@@ -23,6 +23,7 @@ from apscheduler.triggers.cron import CronTrigger
 from RestrictedPython import compile_restricted, safe_builtins
 from RestrictedPython.Eval import (default_guarded_getitem,
                                    default_guarded_getiter)
+from RestrictedPython.Guards import guarded_iter_unpack_sequence
 from selenium import webdriver
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
@@ -53,7 +54,8 @@ def _safe_eval(expr: str, globals: dict[str, Any] | None = None, locals: dict[st
             **safe_builtins,
 
             "_getitem_": default_guarded_getitem,
-            "_getiter_": default_guarded_getiter
+            "_getiter_": default_guarded_getiter,
+            "_iter_unpack_sequence_": guarded_iter_unpack_sequence
         },
 
         **(globals if globals is not None else {})
