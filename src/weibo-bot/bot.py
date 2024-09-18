@@ -1,5 +1,6 @@
 import argparse
 import copy
+import datetime
 import importlib
 import json
 import logging
@@ -9,6 +10,7 @@ import re
 import signal
 import sys
 import tomllib
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from http.cookies import SimpleCookie
@@ -16,6 +18,8 @@ from logging import config
 from threading import Event
 from typing import Any
 
+import qrcode
+import qrcode.constants
 from apscheduler import events
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import BaseScheduler
@@ -222,6 +226,27 @@ class TemplateValidator(Validator):
             raise TypeError(f"Wrong type of template @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
 
 
+class CookieProvider:
+    __value: list[dict[str, Any]] | None
+    __options: dict[str, Any] | None
+
+    def __init__(self, value: list[dict[str, Any]] | None, options: dict[str, Any] | None = None) -> None:
+        self.__value = value
+        self.__options = options
+
+    @property
+    def value(self) -> list[dict[str, Any]] | None:
+        return self.__value
+
+    @property
+    def options(self) -> dict[str, Any] | None:
+        return self.__options
+
+    @property
+    def live(self) -> bool:
+        return self.__value is None
+
+
 class CookieParser:
     __id: str
 
@@ -232,23 +257,24 @@ class CookieParser:
     def id(self) -> str:
         return self.__id
 
-    def parse(self, value: str, type: str | None = None, source: str | None = None) -> list[dict[str, Any]]:
-        cookies_str: str
+    def parse(self, value: str, type: str | None = None, source: str | None = None) -> CookieProvider:
+        actual_value: str
 
         match source:
             case None | "string":
-                cookies_str = value
+                actual_value = value
             case "file":
                 with open(value, "r") as f:
-                    cookies_str = f.read()
+                    actual_value = f.read()
             case _:
                 raise ValueError(f"Wrong value of cookies source @{self.id}; got {repr(source)}, expected 'string' or 'file'")
 
-        cookies: list[dict[str, Any]]
+        cookies: list[dict[str, Any]] | None
+        options: dict[str, Any] | None
 
         match type:
             case None | "header":
-                cookies = [{
+                cookies, options = [{
                     "domain": ".weibo.com",
                     "name": key,
                     "value": morsel.value,
@@ -257,17 +283,20 @@ class CookieParser:
                     "httpOnly": False,
                     "hostOnly": False,
                     "secure": False
-                } for key, morsel in SimpleCookie(cookies_str).items()]
+                } for key, morsel in SimpleCookie(actual_value).items()], None
             case "json":
-                cookies = json.loads(cookies_str)
+                cookies, options = [cookie for cookie in json.loads(actual_value) if isinstance(cookie, dict)], None
+            case "live":
+                cookies, options = None, json.loads(actual_value)
             case _:
                 raise ValueError(f"Wrong value of cookies type @{self.id}; got {repr(type)}, expected 'header' or 'json'")
 
-        for cookie in cookies:
-            if isinstance(cookie.get("expiry"), float):
-                cookie["expiry"] = int(cookie["expiry"])
+        if cookies is not None:
+            for cookie in cookies:
+                if isinstance(cookie.get("expiry"), float):
+                    cookie["expiry"] = int(cookie["expiry"])
 
-        return cookies
+        return CookieProvider(cookies, options)
 
 
 class ModImporter:
@@ -388,10 +417,11 @@ class Poster:
 
         return self
 
-    def with_cookies(self, value: list[dict[str, Any]]):
+    def with_cookies(self, provider: CookieProvider):
         driver = self.__driver
 
         app_xpath = '//div[@id="app"]'
+        home_wrap_xpath = '//div[@id="homeWrap"]'
 
         current = driver.current_window_handle
         current_index = driver.window_handles.index(current)
@@ -406,13 +436,39 @@ class Poster:
 
             driver.delete_all_cookies()
 
-            for cookie in value:
-                driver.add_cookie(cookie)
+            if provider.live:
+                scanning_wait = WebDriverWait(driver, (provider.options if provider.options is not None else {}).get("qrcode", {}).get("expires", 300))
 
-            home_wrap_xpath = '//div[@id="homeWrap"]'
+                driver.get("https://passport.weibo.com/sso/signin?url=https%3A%2F%2Fweibo.com")
 
-            driver.refresh()
-            loading_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
+                qrcode_img_xpath = '//div[@id="app"]/div/div/div[2]/div[1]/div[2]/div/img'
+
+                qrcode_img: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, qrcode_img_xpath))) \
+                                            if loading_wait.until(EC.text_to_be_present_in_element_attribute((By.XPATH, qrcode_img_xpath), "src", "http")) \
+                                            else None
+                qrcode_img_src: str = qrcode_img.get_attribute("src")
+
+                qrcode_content = urllib.parse.parse_qs(urllib.parse.urlparse(qrcode_img_src).query)["data"][0]
+
+                qr = qrcode.QRCode(
+                    version = 1,
+                    error_correction = qrcode.constants.ERROR_CORRECT_L,
+                    box_size = 10,
+                    border = 2
+                )
+
+                qr.add_data(qrcode_content)
+
+                print(f"@{self.id}, expires at '{(datetime.datetime.now() + datetime.timedelta(seconds = scanning_wait._timeout)):%Y-%m-%d %H:%M:%S}'")
+                qr.print_ascii(invert = True)
+
+                scanning_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
+            else:
+                for cookie in provider.value:
+                    driver.add_cookie(cookie)
+
+                driver.refresh()
+                loading_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
 
         finally:
             driver.close()
@@ -509,12 +565,20 @@ class Poster:
 
 
 class User:
-    posters: dict[str, Poster]
-    scheduler: BaseScheduler
+    __posters: dict[str, Poster]
+    __scheduler: BaseScheduler
 
     def __init__(self, posters: dict[str, Poster], scheduler: BaseScheduler) -> None:
-        self.posters = posters
-        self.scheduler = scheduler
+        self.__posters = posters
+        self.__scheduler = scheduler
+
+    @property
+    def posters(self) -> dict[str, Poster]:
+        return self.__posters
+
+    @property
+    def scheduler(self) -> BaseScheduler:
+        return self.__scheduler
 
 
 class Bot:
@@ -606,7 +670,7 @@ class Bot:
             UserNameValidator(user_name).validate(user_name)
 
             timezone: str | None = user_conf.get("timezone", conf["default"].get("timezone"))
-            cookies: list[dict[str, Any]] = CookieParser(user_name).parse(**(CookieValidator(user_name).validate(user_conf.get("cookies", conf["default"]["cookies"]))))
+            cookies: CookieProvider = CookieParser(user_name).parse(**(CookieValidator(user_name).validate(user_conf.get("cookies", conf["default"]["cookies"]))))
             envs: dict[str, Any] = copy.deepcopy({
                 **(conf["default"].get("envs", {})),
                 **(user_conf.get("envs", {}))

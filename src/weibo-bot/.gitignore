@@ -5,3 +5,5 @@ logs/
 !*example.toml
 
 *.json
+
+!*example.json

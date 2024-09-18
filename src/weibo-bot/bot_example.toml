@@ -61,3 +61,8 @@ world = "Hello"
 cookies.source = "file"
 cookies.type = "json"
 cookies.value = "<cheems_cookies_json_file>"
+
+[doge]
+cookies.source = "file"
+cookies.type = "live"
+cookies.value = "<doge_live_json_file>"
