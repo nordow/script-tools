@@ -547,7 +547,7 @@ class Poster:
 
             # send_button.click()
             driver.execute_script("arguments[0].click();", send_button)
-            execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+            execution_wait.until(EC.element_attribute_to_include((By.XPATH, send_button_xpath), "disabled"))
 
         finally:
             driver.close()
