@@ -463,6 +463,7 @@ class Poster:
                 qr.print_ascii(invert = True)
 
                 scanning_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
+
             else:
                 for cookie in provider.value:
                     driver.add_cookie(cookie)
@@ -632,6 +633,8 @@ class Bot:
                 "vars": eval_vars(vars, envs, mods)
             }
 
+            real: bool
+
             try:
                 execute_commands(commands, "pre", job_kwargs, job_id)
 
@@ -655,12 +658,22 @@ class Bot:
                 try:
                     poster.send(text = text, images = images)
                 except PreviewException:
-                    return False
+                    real = False
                 else:
-                    return True
+                    real = True
+
+            except:
+                execute_commands(commands, "fail", job_kwargs, job_id)
+
+                raise
+
+            else:
+                execute_commands(commands, "success", job_kwargs, job_id)
 
             finally:
                 execute_commands(commands, "post", job_kwargs, job_id)
+
+            return real
 
         conf = self.__conf
         preview = self.__preview

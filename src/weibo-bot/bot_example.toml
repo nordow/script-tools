@@ -29,6 +29,8 @@ select = "random"
 commands.pre = [
     "mods['operator'].setitem(vars['caches'], 'random_emoji', mods['random'].choice(envs['emojis']))"
 ]
+commands.success = "mods['do_nothing']()"
+commands.fail = "mods['do_nothing']()"
 commands.post = "mods['do_nothing']()"
 templates = [
     "<1> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][0]}",
