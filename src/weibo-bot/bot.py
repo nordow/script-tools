@@ -1,6 +1,7 @@
 import argparse
 import copy
 import datetime
+import functools
 import importlib
 import json
 import logging
@@ -12,10 +13,11 @@ import sys
 import tomllib
 import urllib.parse
 import urllib.request
+from _thread import LockType
 from collections.abc import Callable
 from http.cookies import SimpleCookie
 from logging import config
-from threading import Event
+from threading import Event, Lock
 from typing import Any
 
 import qrcode
@@ -48,6 +50,32 @@ _EVENT_NOTIFICATION = "Notification"
 
 
 _logger = logging.getLogger(__name__)
+
+
+def sync(lock):
+    if isinstance(lock, LockType):
+
+        def decorator(func):
+
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                with lock:
+                    return func(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
+
+    else:
+        func = lock
+        lock = Lock()
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            with lock:
+                return func(*args, **kwargs)
+
+        return wrapper
 
 
 def _safe_eval(expr: str, globals: dict[str, Any] | None = None, locals: dict[str, Any] | None = None) -> Any:
@@ -380,9 +408,15 @@ class Poster:
     __driver: WebDriver
     __preview: bool
 
+    __lock: Lock
+
     def __init__(self, id: str) -> None:
         self.__id = id
         self.__preview = False
+        self.__lock = Lock()
+
+        self.__with_cookies_sync()
+        self.__send_sync()
 
         options = webdriver.ChromeOptions()
 
@@ -417,6 +451,7 @@ class Poster:
 
         return self
 
+    def __with_cookies_sync(self): self.with_cookies = sync(self.__lock)(self.with_cookies)
     def with_cookies(self, provider: CookieProvider):
         driver = self.__driver
 
@@ -477,6 +512,7 @@ class Poster:
 
         return self
 
+    def __send_sync(self): self.send = sync(self.__lock)(self.send)
     def send(self, **kwargs) -> None:
         text: str | None = kwargs.get("text")
         images: list[str] | None = kwargs.get("images")
@@ -566,16 +602,16 @@ class Poster:
 
 
 class User:
-    __posters: dict[str, Poster]
+    __poster: Poster
     __scheduler: BaseScheduler
 
-    def __init__(self, posters: dict[str, Poster], scheduler: BaseScheduler) -> None:
-        self.__posters = posters
+    def __init__(self, poster: Poster, scheduler: BaseScheduler) -> None:
+        self.__poster = poster
         self.__scheduler = scheduler
 
     @property
-    def posters(self) -> dict[str, Poster]:
-        return self.__posters
+    def poster(self) -> Poster:
+        return self.__poster
 
     @property
     def scheduler(self) -> BaseScheduler:
@@ -594,6 +630,7 @@ class Bot:
 
     def init(self) -> None:
 
+        @sync
         def send_post(poster: Poster, kwargs: dict[str, Any]) -> bool:
 
             def eval_vars(vars: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
@@ -617,7 +654,7 @@ class Bot:
                 for command in group_commands:
                     _safe_eval(command, kwargs)
 
-            job_id: str = poster.id
+            job_id: str = kwargs["id"]
 
             envs: dict[str, Any] = kwargs["envs"]
             mods: dict[str, Any] = kwargs["mods"]
@@ -697,17 +734,13 @@ class Bot:
                 **(user_conf.get("vars", {}))
             })
             jobs: dict[str, dict[str, Any]] = user_conf.get("jobs", conf["default"].get("jobs", {}))
-            posters: dict[str, Poster] = {}
+            poster = Poster(user_name).with_preview(preview).with_cookies(cookies)
             scheduler = BackgroundScheduler()
 
             for job_name, job_conf in jobs.items():
                 JobNameValidator(user_name).validate(job_name)
 
                 job_id = f"{user_name}.{job_name}"
-
-                poster = Poster(job_id).with_preview(preview).with_cookies(cookies)
-
-                posters[job_name] = poster
 
                 job_cron: str = job_conf["cron"]
                 job_jitter: int | None = job_conf.get("jitter")
@@ -717,6 +750,8 @@ class Bot:
 
                 scheduler.add_job(send_post, FullCronTrigger.from_cron(job_cron, timezone, job_jitter), kwargs = {
                     "kwargs": {
+                        "id": job_id,
+
                         "envs": envs,
                         "mods": mods,
                         "vars": vars,
@@ -794,7 +829,7 @@ class Bot:
                 events.EVENT_JOB_ERROR
             )
 
-            users[user_name] = User(posters, scheduler)
+            users[user_name] = User(poster, scheduler)
 
         for user in users.values():
             user.scheduler.start(paused = True)
@@ -818,9 +853,7 @@ class Bot:
 
         for user in users.values():
             user.scheduler.shutdown(wait = False)
-
-            for poster in user.posters.values():
-                poster.dispose()
+            user.poster.dispose()
 
         self.__users = None
 
