@@ -7,6 +7,7 @@ timezone = "Asia/Shanghai"
 hello = "Hello"
 world = "World"
 emojis = ["🤣", "🙃", "🫠"]
+default_options.behavior = "origin"
 
 [default.mods]
 random = "random"
@@ -36,7 +37,11 @@ templates = [
     "<1> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][0]}",
     "<2> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][1]}",
     "<3> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {envs['emojis'][2]}",
-    { text = "<4> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", images = ["http://www.lenna.org/lena_std.tif"] }
+    { text = "<4> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", images = ["http://www.lenna.org/lena_std.tif"] },
+    { text = "<5> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options.behavior = "origin" },
+    { text = "<6> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options.behavior = "repost", options.keep_quote = true, options.comment = true, options.quote = { uid = "...", bid = "..." } },
+    { text = "<7> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options.behavior = "comment", options.repost = true, options.quote = { uid = "...", bid = "..." } },
+    { text = "<8> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options = "envs['default_options']" }
 ]
 
 [default.jobs.double]

@@ -31,6 +31,7 @@ from RestrictedPython.Eval import (default_guarded_getitem,
                                    default_guarded_getiter)
 from RestrictedPython.Guards import guarded_iter_unpack_sequence
 from selenium import webdriver
+from selenium.common import exceptions as EX
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -243,12 +244,14 @@ class TemplateValidator(Validator):
         if isinstance(value, str):
             return {
                 "text": value,
-                "images": []
+                "images": [],
+                "options": {}
             }
         elif isinstance(value, dict):
             return {
                 "text": value["text"],
-                "images": value.get("images", [])
+                "images": value.get("images", []),
+                "options": value.get("options", {})
             }
         else:
             raise TypeError(f"Wrong type of template @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
@@ -514,9 +517,23 @@ class Poster:
 
     def __send_sync(self): self.send = sync(self.__lock)(self.send)
     def send(self, **kwargs) -> None:
-        text: str | None = kwargs.get("text")
-        images: list[str] | None = kwargs.get("images")
+        text: str = kwargs.get("text", "")
+        images: list[str] = kwargs.get("images", [])
+        options: dict[str, Any] = kwargs.get("options", {})
 
+        behavior: str | None = options.get("behavior")
+
+        match behavior:
+            case None | "origin":
+                self.__send_origin(text, images, options)
+            case "repost":
+                self.__send_repost(text, images, options)
+            case "comment":
+                self.__send_comment(text, images, options)
+            case _:
+                raise ValueError(f"Wrong value of behavior @{self.id}; got {repr(behavior)}, expected 'origin' or 'repost' or 'comment'")
+
+    def __send_origin(self, text: str, images: list[str], options: dict[str, Any]) -> None:
         if not images and (not text or text.isspace()):
             raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace, if there is no images")
 
@@ -545,7 +562,7 @@ class Poster:
             # text_textarea.clear()
             text_textarea.send_keys(Keys.CONTROL, "A")
             text_textarea.send_keys(Keys.DELETE)
-            execution_wait.until_not(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+            execution_wait.until(EC.element_attribute_to_include((By.XPATH, send_button_xpath), "disabled"))
 
             if images:
                 file_input_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/input'
@@ -578,6 +595,151 @@ class Poster:
                 finally:
                     for path in (file[0] for file in files if file[1]):
                         _try_delete_file(path)
+
+            text_textarea.send_keys(text)
+            execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+            # send_button.click()
+            driver.execute_script("arguments[0].click();", send_button)
+            execution_wait.until(EC.element_attribute_to_include((By.XPATH, send_button_xpath), "disabled"))
+
+        finally:
+            driver.close()
+            driver.switch_to.window(current)
+
+    def __send_repost(self, text: str, images: list[str], options: dict[str, Any]) -> None:
+
+        def text_to_be_not_equal_to_element_attribute(locator, attribute_, text_):
+            """
+            An expectation for checking if the given text is not equal to the element's attribute.
+            locator, attribute, text
+            """
+
+            def _predicate(driver):
+                try:
+                    if not EC.element_attribute_to_include(locator, attribute_)(driver):
+                        return False
+                    element_text = driver.find_element(*locator).get_attribute(attribute_)
+                    return text_ != element_text
+                except EX.StaleElementReferenceException:
+                    return False
+
+            return _predicate
+
+        quote: dict[str, Any] = options.get("quote", {})
+
+        if not re.search(r"^[0-9]+$", quote["uid"]):
+            raise ValueError(f"Wrong value of quote.uid @{self.id}; got {repr(quote['uid'])}, expected ^[0-9]+$")
+
+        if not re.search(r"^[A-Za-z0-9]+$", quote["bid"]):
+            raise ValueError(f"Wrong value of quote.bid @{self.id}; got {repr(quote['bid'])}, expected ^[A-Za-z0-9]+$")
+
+        driver = self.__driver
+        preview = self.__preview
+
+        if preview:
+            raise PreviewException(f"Preview over @{self.id}")
+
+        current = driver.current_window_handle
+        current_index = driver.window_handles.index(current)
+
+        driver.execute_script(f"window.open('https://weibo.com/{quote['uid']}/{quote['bid']}#repost', '_blank')")
+        driver.switch_to.window(driver.window_handles[current_index + 1])
+
+        try:
+            element_wait = WebDriverWait(driver, 30)
+            execution_wait = WebDriverWait(driver, 15)
+
+            text_textarea_xpath = '//div[@id="composerEle"]/div[2]/div/div[1]/div/textarea'
+            send_button_xpath = '//div[@id="composerEle"]/div[2]/div/div[3]/div/button'
+
+            text_textarea: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, text_textarea_xpath)))
+            send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
+
+            if not options.get("keep_quote", True):
+                tool_div_xpath = '//div[@id="composerEle"]/div[2]/div/div[3]/div/div'
+
+                # text_textarea.clear()
+                text_textarea.send_keys(Keys.CONTROL, "A")
+                text_textarea.send_keys(Keys.DELETE)
+                execution_wait.until(lambda driver: len(driver.find_elements(By.XPATH, tool_div_xpath)) == 3)
+
+            if options.get("comment", False):
+                comment_checkbox_xpath = '//div[@id="composerEle"]/div[2]/div/div[3]/div/div[2]/label/input'
+                comment_span_xpath = '//div[@id="composerEle"]/div[2]/div/div[3]/div/div[2]/label/span[1]'
+
+                comment_checkbox: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, comment_checkbox_xpath)))
+
+                # comment_checkbox.click()
+                driver.execute_script("arguments[0].click();", comment_checkbox)
+                execution_wait.until(EC.text_to_be_present_in_element_attribute((By.XPATH, comment_span_xpath), "class", "woo-checkbox-checked"))
+
+            text_textarea.send_keys(text)
+            execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+            repost_a_xpath = '//div[@id="scroller"]/div[1]/div[1]/div/div/div/div/div[2]/div[2]/div[1]/a'
+
+            repost_a: WebElement | None = repost_a_list[0] if (repost_a_list := driver.find_elements(By.XPATH, repost_a_xpath)) else None
+            repost_a_href: str | None = repost_a.get_attribute("href") if repost_a is not None else None
+
+            # send_button.click()
+            driver.execute_script("arguments[0].click();", send_button)
+            execution_wait.until(text_to_be_not_equal_to_element_attribute((By.XPATH, repost_a_xpath), "href", repost_a_href))
+
+        finally:
+            driver.close()
+            driver.switch_to.window(current)
+
+    def __send_comment(self, text: str, images: list[str], options: dict[str, Any]) -> None:
+        quote: dict[str, Any] = options.get("quote", {})
+
+        if not re.search(r"^[0-9]+$", quote["uid"]):
+            raise ValueError(f"Wrong value of quote.uid @{self.id}; got {repr(quote['uid'])}, expected ^[0-9]+$")
+
+        if not re.search(r"^[A-Za-z0-9]+$", quote["bid"]):
+            raise ValueError(f"Wrong value of quote.bid @{self.id}; got {repr(quote['bid'])}, expected ^[A-Za-z0-9]+$")
+
+        if not text or text.isspace():
+            raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace")
+
+        driver = self.__driver
+        preview = self.__preview
+
+        if preview:
+            raise PreviewException(f"Preview over @{self.id}")
+
+        current = driver.current_window_handle
+        current_index = driver.window_handles.index(current)
+
+        driver.execute_script(f"window.open('https://weibo.com/{quote['uid']}/{quote['bid']}#comment', '_blank')")
+        driver.switch_to.window(driver.window_handles[current_index + 1])
+
+        try:
+            element_wait = WebDriverWait(driver, 30)
+            execution_wait = WebDriverWait(driver, 15)
+
+            text_textarea_xpath = '//div[@id="composerEle"]/div[2]/div/div[1]/div/textarea'
+            send_button_xpath = '//div[@id="composerEle"]/div[2]/div/div[3]/div/button'
+
+            text_textarea: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, text_textarea_xpath)))
+            send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
+
+            tool_div_xpath = '//div[@id="composerEle"]/div[2]/div/div[3]/div/div'
+
+            # text_textarea.clear()
+            text_textarea.send_keys(Keys.CONTROL, "A")
+            text_textarea.send_keys(Keys.DELETE)
+            execution_wait.until(lambda driver: len(driver.find_elements(By.XPATH, tool_div_xpath)) == 2)
+
+            if options.get("repost", False):
+                repost_checkbox_xpath = '//div[@id="composerEle"]/div[2]/div/div[3]/div/div[2]/label/input'
+                repost_span_xpath = '//div[@id="composerEle"]/div[2]/div/div[3]/div/div[2]/label/span[1]'
+
+                repost_checkbox: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, repost_checkbox_xpath)))
+
+                # repost_checkbox.click()
+                driver.execute_script("arguments[0].click();", repost_checkbox)
+                execution_wait.until(EC.text_to_be_present_in_element_attribute((By.XPATH, repost_span_xpath), "class", "woo-checkbox-checked"))
 
             text_textarea.send_keys(text)
             execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
@@ -680,20 +842,22 @@ class Bot:
                 template = TemplateValidator(job_id).validate(template_conf)
                 template_text = template["text"]
                 template_images = template["images"]
+                template_options = template["options"]
 
                 text = _format_fstring(template_text, **job_kwargs)
-                images = [_format_fstring(template_image, **job_kwargs) for template_image in template_images] if isinstance(template_images, list) else [template_image for template_image in _safe_eval(template_images, job_kwargs)]
+                images = [_format_fstring(template_image, **job_kwargs) for template_image in template_images] if isinstance(template_images, list) else [*(evaluated_images if (evaluated_images := _safe_eval(template_images, job_kwargs)) is not None else [])]
+                options = template_options if isinstance(template_options, dict) else { **(evaluated_options if (evaluated_options := _safe_eval(template_options, job_kwargs)) is not None else {}) }
 
                 _logger.info(
                     _format_message(
                         sender = job_id,
                         event = _EVENT_PROCESS,
-                        message = f'{repr(template_conf)} -> {repr(text if not images else { "text": text, "images": images })}'
+                        message = f'{repr(template_conf)} -> {repr(text if not images and not options else { "text": text, "images": images } if not options else { "text": text, "options": options } if not images else { "text": text, "images": images, "options": options })}'
                     )
                 )
 
                 try:
-                    poster.send(text = text, images = images)
+                    poster.send(text = text, images = images, options = options)
                 except PreviewException:
                     real = False
                 else:
