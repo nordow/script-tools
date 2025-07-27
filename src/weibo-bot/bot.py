@@ -534,6 +534,23 @@ class Poster:
                 raise ValueError(f"Wrong value of behavior @{self.id}; got {repr(behavior)}, expected 'origin' or 'repost' or 'comment'")
 
     def __send_origin(self, text: str, images: list[str], options: dict[str, Any]) -> None:
+
+        def non_presence_of_element_located(locator):
+            """ An expectation for checking that an element is not present on the DOM
+            of a page.
+            locator - used to find the element
+            returns False if the element is present on the DOM, True otherwise.
+            """
+
+            def _predicate(driver):
+                try:
+                    driver.find_element(*locator)
+                    return False
+                except EX.NoSuchElementException:
+                    return True
+
+            return _predicate
+
         if not images and (not text or text.isspace()):
             raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace, if there is no images")
 
@@ -582,6 +599,7 @@ class Poster:
                     upload_wait = WebDriverWait(driver, 60)
 
                     item_div_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div'
+                    loading_svg_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/svg'
                     cover_img_xpath = '//div[@id="homeWrap"]/div[1]/div/div[2]/div/div/div[{index}]/div/div/img'
 
                     file_div_list: list[WebElement] = execution_wait.until(EC.presence_of_all_elements_located((By.XPATH, item_div_xpath)))[:-1]
@@ -590,7 +608,9 @@ class Poster:
                         raise ValueError(f"Find {files_diff} unacceptable image(s) @{self.id}; got {images}, expected [images]{{0,18}} or [images and videos]{{0,9}}, accepted {repr(file_input_accept)}")
 
                     for index in range(len(file_div_list)):
-                        upload_wait.until(EC.presence_of_element_located((By.XPATH, cover_img_xpath.format(index = 1 + index))))
+                        upload_wait.until(EC.all_of(
+                            non_presence_of_element_located((By.XPATH, loading_svg_xpath.format(index = 1 + index))),
+                            EC.presence_of_element_located((By.XPATH, cover_img_xpath.format(index = 1 + index)))))
 
                 finally:
                     for path in (file[0] for file in files if file[1]):
