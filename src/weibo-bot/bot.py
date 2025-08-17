@@ -815,11 +815,12 @@ class Bot:
         @sync
         def send_post(poster: Poster, kwargs: dict[str, Any]) -> bool:
 
-            def eval_vars(vars: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
+            def eval_vars(vars: dict[str, Any], builtins: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
                 evaluated_vars: dict[str, Any] = {}
 
                 for var_name, var_expr in vars.items():
                     evaluated_var = _safe_eval(var_expr, {
+                        "builtins": builtins,
                         "envs": envs,
                         "mods": mods,
                         "vars": evaluated_vars
@@ -838,6 +839,7 @@ class Bot:
 
             job_id: str = kwargs["id"]
 
+            builtins: dict[str, Any] = kwargs["builtins"]
             envs: dict[str, Any] = kwargs["envs"]
             mods: dict[str, Any] = kwargs["mods"]
             vars: dict[str, Any] = kwargs["vars"]
@@ -847,9 +849,10 @@ class Bot:
             templates: list[dict[str, Any] | str] | None = kwargs["templates"]
 
             job_kwargs = {
+                "builtins": builtins,
                 "envs": envs,
                 "mods": mods,
-                "vars": eval_vars(vars, envs, mods)
+                "vars": eval_vars(vars, builtins, envs, mods)
             }
 
             real: bool
@@ -905,6 +908,7 @@ class Bot:
 
             timezone: str | None = user_conf.get("timezone", conf["default"].get("timezone"))
             cookies: CookieProvider = CookieParser(user_name).parse(**(CookieValidator(user_name).validate(user_conf.get("cookies", conf["default"]["cookies"]))))
+            builtins: dict[str, Any] = {}
             envs: dict[str, Any] = copy.deepcopy({
                 **(conf["default"].get("envs", {})),
                 **(user_conf.get("envs", {}))
@@ -912,7 +916,7 @@ class Bot:
             mods: dict[str, Any] = ModImporter(user_name).import_multi({key: ModValidator(f"{user_name}.{key}").validate(value) for key, value in {
                 **(conf["default"].get("mods", {})),
                 **(user_conf.get("mods", {}))
-            }.items()}, lambda mods: { "envs": envs, "mods": mods })
+            }.items()}, lambda mods: { "builtins": builtins, "envs": envs, "mods": mods })
             vars: dict[str, Any] = copy.deepcopy({
                 **(conf["default"].get("vars", {})),
                 **(user_conf.get("vars", {}))
@@ -936,6 +940,7 @@ class Bot:
                     "kwargs": {
                         "id": job_id,
 
+                        "builtins": builtins,
                         "envs": envs,
                         "mods": mods,
                         "vars": vars,

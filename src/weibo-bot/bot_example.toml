@@ -19,6 +19,7 @@ current_timezone = { type = "expression", value = "mods['pytz'].timezone(envs['t
 do_nothing = { type = "expression", value = "lambda: None" }
 
 [default.vars]
+builtins_count = "len(builtins)"
 now = "mods['datetime'].datetime.now(mods['current_timezone'])"
 week = "vars['now'].weekday()"
 caches = "{}"
