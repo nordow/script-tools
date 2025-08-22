@@ -406,20 +406,17 @@ class TemplateSelector:
         return template
 
 
-class Poster:
+class Engine:
     __id: str
     __driver: WebDriver
-    __preview: bool
+    __props: dict[str, Any]
 
     __lock: Lock
 
     def __init__(self, id: str) -> None:
         self.__id = id
-        self.__preview = False
+        self.__props = {}
         self.__lock = Lock()
-
-        self.__with_cookies_sync()
-        self.__send_sync()
 
         options = webdriver.ChromeOptions()
 
@@ -442,6 +439,44 @@ class Poster:
         return self.__id
 
     @property
+    def driver(self) -> WebDriver:
+        return self.__driver
+
+    @property
+    def props(self) -> dict[str, Any]:
+        return self.__props
+
+    @property
+    def lock(self) -> Lock:
+        return self.__lock
+
+    def dispose(self) -> None:
+        driver = self.__driver
+
+        if driver is None:
+            return
+
+        driver.quit()
+
+        self.__driver = None
+
+
+class Poster:
+    __engine: Engine
+    __preview: bool
+
+    def __init__(self, engine: Engine) -> None:
+        self.__engine = engine
+        self.__preview = False
+
+        self.__with_cookies_sync()
+        self.__send_sync()
+
+    @property
+    def id(self) -> str:
+        return self.__engine.id
+
+    @property
     def preview(self) -> bool:
         return self.__preview
 
@@ -454,9 +489,11 @@ class Poster:
 
         return self
 
-    def __with_cookies_sync(self): self.with_cookies = sync(self.__lock)(self.with_cookies)
+    def __with_cookies_sync(self): self.with_cookies = sync(self.__engine.lock)(self.with_cookies)
     def with_cookies(self, provider: CookieProvider):
-        driver = self.__driver
+        engine = self.__engine
+
+        driver = engine.driver
 
         app_xpath = '//div[@id="app"]'
         home_wrap_xpath = '//div[@id="homeWrap"]'
@@ -515,7 +552,7 @@ class Poster:
 
         return self
 
-    def __send_sync(self): self.send = sync(self.__lock)(self.send)
+    def __send_sync(self): self.send = sync(self.__engine.lock)(self.send)
     def send(self, **kwargs) -> None:
         text: str = kwargs.get("text", "")
         images: list[str] = kwargs.get("images", [])
@@ -554,8 +591,10 @@ class Poster:
         if not images and (not text or text.isspace()):
             raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace, if there is no images")
 
-        driver = self.__driver
+        engine = self.__engine
         preview = self.__preview
+
+        driver = engine.driver
 
         if preview:
             raise PreviewException(f"Preview over @{self.id}")
@@ -654,8 +693,10 @@ class Poster:
         if not re.search(r"^[A-Za-z0-9]+$", quote["bid"]):
             raise ValueError(f"Wrong value of quote.bid @{self.id}; got {repr(quote['bid'])}, expected ^[A-Za-z0-9]+$")
 
-        driver = self.__driver
+        engine = self.__engine
         preview = self.__preview
+
+        driver = engine.driver
 
         if preview:
             raise PreviewException(f"Preview over @{self.id}")
@@ -722,8 +763,10 @@ class Poster:
         if not text or text.isspace():
             raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace")
 
-        driver = self.__driver
+        engine = self.__engine
         preview = self.__preview
+
+        driver = engine.driver
 
         if preview:
             raise PreviewException(f"Preview over @{self.id}")
@@ -772,28 +815,18 @@ class Poster:
             driver.close()
             driver.switch_to.window(current)
 
-    def dispose(self) -> None:
-        driver = self.__driver
-
-        if driver is None:
-            return
-
-        driver.quit()
-
-        self.__driver = None
-
 
 class User:
-    __poster: Poster
+    __engine: Engine
     __scheduler: BaseScheduler
 
-    def __init__(self, poster: Poster, scheduler: BaseScheduler) -> None:
-        self.__poster = poster
+    def __init__(self, engine: Engine, scheduler: BaseScheduler) -> None:
+        self.__engine = engine
         self.__scheduler = scheduler
 
     @property
-    def poster(self) -> Poster:
-        return self.__poster
+    def engine(self) -> Engine:
+        return self.__engine
 
     @property
     def scheduler(self) -> BaseScheduler:
@@ -922,7 +955,8 @@ class Bot:
                 **(user_conf.get("vars", {}))
             })
             jobs: dict[str, dict[str, Any]] = user_conf.get("jobs", conf["default"].get("jobs", {}))
-            poster = Poster(user_name).with_preview(preview).with_cookies(cookies)
+            engine = Engine(user_name)
+            poster = Poster(engine).with_preview(preview).with_cookies(cookies)
             scheduler = BackgroundScheduler()
 
             for job_name, job_conf in jobs.items():
@@ -1018,7 +1052,7 @@ class Bot:
                 events.EVENT_JOB_ERROR
             )
 
-            users[user_name] = User(poster, scheduler)
+            users[user_name] = User(engine, scheduler)
 
         for user in users.values():
             user.scheduler.start(paused = True)
@@ -1042,7 +1076,7 @@ class Bot:
 
         for user in users.values():
             user.scheduler.shutdown(wait = False)
-            user.poster.dispose()
+            user.engine.dispose()
 
         self.__users = None
 
