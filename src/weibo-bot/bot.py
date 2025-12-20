@@ -552,6 +552,26 @@ class Poster:
                 driver.refresh()
                 loading_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
 
+            profile_a_xpath = '//div[@id="app"]/div[2]/div[1]/div/div[1]/div/div/div[2]/div/div[1]/a[5]'
+            profile_div_xpath = '//div[@id="app"]/div[2]/div[1]/div/div[1]/div/div/div[2]/div/div[1]/a[5]/div/div/div'
+
+            profile_a: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_a_xpath)))
+            profile_a_href: str = profile_a.get_attribute("href")
+            profile_id: str = re.search(r"/u/([0-9]+)$", profile_a_href).group(1)
+
+            profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
+            profile_div_title: str = profile_div.get_attribute("title")
+            profile_name: str = profile_div_title
+
+            _logger.info(
+                _format_message(
+                    sender = _SYSTEM,
+                    event = _EVENT_EXECUTION,
+                    message = f"@{self.id} Init OK! -> ({profile_id}, '{profile_name}')",
+                    root = True
+                )
+            )
+
         finally:
             driver.close()
             driver.switch_to.window(current)
