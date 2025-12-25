@@ -74,3 +74,4 @@ cookies.value = "<cheems_cookies_json_file>"
 cookies.source = "file"
 cookies.type = "live"
 cookies.value = "<doge_live_json_file>"
+cookies.mode = "interactive" # interactive(default), fallback, override, migrate

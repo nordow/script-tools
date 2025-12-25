@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 from _thread import LockType
 from collections.abc import Callable
+from enum import auto, Enum, Flag
 from http.cookies import SimpleCookie
 from logging import config
 from threading import Event, Lock
@@ -108,6 +109,25 @@ def _try_delete_file(path: str) -> bool:
     except OSError:
         return False
 
+def _input_yes_no(prompt, default: bool | None = None) -> bool:
+    while True:
+        user_input = input(prompt).strip().lower()
+
+        if not user_input:
+            if default is None:
+                continue
+
+            else:
+                user_input = "y" if default else "n"
+
+        match user_input:
+            case "n" | "no":
+                return False
+            case "y" | "yes":
+                return True
+            case _:
+                print("Invalid input, please enter 'yes' or 'no'")
+
 
 class FullCronTrigger(CronTrigger):
 
@@ -169,13 +189,15 @@ class CookieValidator(Validator):
             return {
                 "source": "string",
                 "type": "header",
-                "value": value
+                "value": value,
+                "mode": "interactive"
             }
         elif isinstance(value, dict):
             return {
                 "source": value.get("source"),
                 "type": value["type"],
-                "value": value["value"]
+                "value": value["value"],
+                "mode": value.get("mode")
             }
         else:
             raise TypeError(f"Wrong type of cookies @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
@@ -257,17 +279,36 @@ class TemplateValidator(Validator):
             raise TypeError(f"Wrong type of template @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
 
 
+class _InternalCookiePolicy(Flag):
+    NONE = 0
+    OVERRIDE = auto()
+    SANITIZE = auto()
+
+
+class CookieMode(Enum):
+    INTERACTIVE = auto()
+    FALLBACK = auto()
+    OVERRIDE = auto()
+    MIGRATE = auto()
+
+
 class CookieProvider:
     __value: list[dict[str, Any]] | None
+    __mode: CookieMode
     __options: dict[str, Any] | None
 
-    def __init__(self, value: list[dict[str, Any]] | None, options: dict[str, Any] | None = None) -> None:
+    def __init__(self, value: list[dict[str, Any]] | None, mode: CookieMode, options: dict[str, Any] | None = None) -> None:
         self.__value = value
+        self.__mode = mode
         self.__options = options
 
     @property
     def value(self) -> list[dict[str, Any]] | None:
         return self.__value
+
+    @property
+    def mode(self) -> CookieMode:
+        return self.__mode
 
     @property
     def options(self) -> dict[str, Any] | None:
@@ -288,7 +329,7 @@ class CookieParser:
     def id(self) -> str:
         return self.__id
 
-    def parse(self, value: str, type: str | None = None, source: str | None = None) -> CookieProvider:
+    def parse(self, value: str, type: str | None = None, source: str | None = None, mode: str | None = None) -> CookieProvider:
         actual_value: str
 
         match source:
@@ -327,7 +368,21 @@ class CookieParser:
                 if isinstance(cookie.get("expiry"), float):
                     cookie["expiry"] = int(cookie["expiry"])
 
-        return CookieProvider(cookies, options)
+        actual_mode: CookieMode
+
+        match mode:
+            case None | "interactive":
+                actual_mode = CookieMode.INTERACTIVE
+            case "fallback":
+                actual_mode = CookieMode.FALLBACK
+            case "override":
+                actual_mode = CookieMode.OVERRIDE
+            case "migrate":
+                actual_mode = CookieMode.MIGRATE
+            case _:
+                raise ValueError(f"Wrong value of cookies mode @{self.id}; got {repr(mode)}, expected 'interactive' or 'fallback' or 'override' or 'migrate'")
+
+        return CookieProvider(cookies, actual_mode, options)
 
 
 class ModImporter:
@@ -426,7 +481,7 @@ class Engine:
 
         options.add_argument("--no-sandbox")
         options.add_argument("--headless")
-        options.add_argument("--incognito")
+        # options.add_argument("--incognito")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument(f"--user-data-dir={os.path.expanduser('~/.config/google-chrome')}")
@@ -501,6 +556,9 @@ class Poster:
 
         driver = engine.driver
 
+        profile_id: str
+        profile_name: str
+
         app_xpath = '//div[@id="app"]'
         home_wrap_xpath = '//div[@id="homeWrap"]'
 
@@ -515,66 +573,133 @@ class Poster:
 
             loading_wait.until(EC.presence_of_element_located((By.XPATH, app_xpath)))
 
-            driver.delete_all_cookies()
-
-            if provider.live:
-                scanning_wait = WebDriverWait(driver, (provider.options if provider.options is not None else {}).get("qrcode", {}).get("expires", 300))
-
-                driver.get("https://passport.weibo.com/sso/signin?url=https%3A%2F%2Fweibo.com")
-
-                qrcode_img_xpath = '//div[@id="app"]/div/div/div[2]/div[1]/div[2]/div/img'
-
-                qrcode_img: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, qrcode_img_xpath))) \
-                                            if loading_wait.until(EC.text_to_be_present_in_element_attribute((By.XPATH, qrcode_img_xpath), "src", "http")) \
-                                            else None
-                qrcode_img_src: str = qrcode_img.get_attribute("src")
-
-                qrcode_content = urllib.parse.parse_qs(urllib.parse.urlparse(qrcode_img_src).query)["data"][0]
-
-                qr = qrcode.QRCode(
-                    version = 1,
-                    error_correction = qrcode.constants.ERROR_CORRECT_L,
-                    box_size = 10,
-                    border = 2
-                )
-
-                qr.add_data(qrcode_content)
-
-                print(f"@{self.id}, expires at '{(datetime.datetime.now() + datetime.timedelta(seconds = scanning_wait._timeout)):%Y-%m-%d %H:%M:%S}'")
-                qr.print_ascii(invert = True)
-
-                scanning_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
-
-            else:
-                for cookie in provider.value:
-                    driver.add_cookie(cookie)
-
-                driver.refresh()
-                loading_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
+            cookie_policy: _InternalCookiePolicy
 
             profile_a_xpath = '//div[@id="app"]/div[2]/div[1]/div/div[1]/div/div/div[2]/div/div[1]/a[5]'
             profile_div_xpath = '//div[@id="app"]/div[2]/div[1]/div/div[1]/div/div/div[2]/div/div[1]/a[5]/div/div/div'
 
-            profile_a: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_a_xpath)))
-            profile_a_href: str = profile_a.get_attribute("href")
-            profile_id: str = re.search(r"/u/([0-9]+)$", profile_a_href).group(1)
+            match provider.mode:
+                case CookieMode.INTERACTIVE:
+                    current_profile_a: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_a_xpath)))
+                    current_profile_a_href: str | None = current_profile_a.get_attribute("href")
 
-            profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
-            profile_div_title: str = profile_div.get_attribute("title")
-            profile_name: str = profile_div_title
+                    if current_profile_a_href is not None:
+                        current_profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
+                        current_profile_div_title: str = current_profile_div.get_attribute("title")
 
-            _logger.info(
-                _format_message(
-                    sender = _SYSTEM,
-                    event = _EVENT_EXECUTION,
-                    message = f"@{self.id} Init OK! -> ({profile_id}, '{profile_name}')",
-                    root = True
-                )
-            )
+                        profile_id = re.search(r"/u/([0-9]+)$", current_profile_a_href).group(1)
+                        profile_name = current_profile_div_title
+
+                        print(f"@{self.id} -> ({profile_id}, '{profile_name}')")
+
+                        if _input_yes_no("[override] do you want to override the current cookies? (y/n) "):
+                            if _input_yes_no("[migrate] do you want to sanitize the current cookies? (y/n) "):
+                                cookie_policy = _InternalCookiePolicy.OVERRIDE | _InternalCookiePolicy.SANITIZE
+                            else:
+                                cookie_policy = _InternalCookiePolicy.OVERRIDE
+                        else:
+                            cookie_policy = _InternalCookiePolicy.NONE
+
+                    else:
+                        print(f"@{self.id} -> None, [fallback] as default")
+
+                        cookie_policy = _InternalCookiePolicy.OVERRIDE
+
+                case CookieMode.FALLBACK:
+                    fallback_profile_a: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_a_xpath)))
+                    fallback_profile_a_href: str | None = fallback_profile_a.get_attribute("href")
+
+                    if fallback_profile_a_href is not None:
+                        fallback_profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
+                        fallback_profile_div_title: str = fallback_profile_div.get_attribute("title")
+
+                        profile_id = re.search(r"/u/([0-9]+)$", fallback_profile_a_href).group(1)
+                        profile_name = fallback_profile_div_title
+
+                        cookie_policy = _InternalCookiePolicy.NONE
+
+                    else:
+                        cookie_policy = _InternalCookiePolicy.OVERRIDE
+
+                case CookieMode.OVERRIDE:
+                    cookie_policy = _InternalCookiePolicy.OVERRIDE
+                case CookieMode.MIGRATE:
+                    cookie_policy = _InternalCookiePolicy.OVERRIDE | _InternalCookiePolicy.SANITIZE
+
+                # never
+                case _:
+                    raise ValueError(f"Wrong value of provider.mode @{self.id}; got {repr(provider.mode)}, expected 'interactive' or 'fallback' or 'override' or 'migrate'")
+
+            if _InternalCookiePolicy.SANITIZE in cookie_policy:
+                driver.get("https://login.sina.com.cn/sso/logout.php?entry=miniblog&r=")
+
+                loading_wait.until(EC.all_of(
+                    EC.url_contains("https://passport.weibo.com/sso/signin"),
+                    EC.presence_of_element_located((By.XPATH, app_xpath))))
+
+            if _InternalCookiePolicy.OVERRIDE in cookie_policy:
+                driver.get("https://weibo.com")
+
+                loading_wait.until(EC.presence_of_element_located((By.XPATH, app_xpath)))
+
+                driver.delete_all_cookies()
+
+                if provider.live:
+                    scanning_wait = WebDriverWait(driver, (provider.options if provider.options is not None else {}).get("qrcode", {}).get("expires", 300))
+
+                    driver.get("https://passport.weibo.com/sso/signin?url=https%3A%2F%2Fweibo.com")
+
+                    qrcode_img_xpath = '//div[@id="app"]/div/div/div[2]/div[1]/div[2]/div/img'
+
+                    qrcode_img: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, qrcode_img_xpath))) \
+                                                if loading_wait.until(EC.text_to_be_present_in_element_attribute((By.XPATH, qrcode_img_xpath), "src", "http")) \
+                                                else None
+                    qrcode_img_src: str = qrcode_img.get_attribute("src")
+
+                    qrcode_content = urllib.parse.parse_qs(urllib.parse.urlparse(qrcode_img_src).query)["data"][0]
+
+                    qr = qrcode.QRCode(
+                        version = 1,
+                        error_correction = qrcode.constants.ERROR_CORRECT_L,
+                        box_size = 10,
+                        border = 2
+                    )
+
+                    qr.add_data(qrcode_content)
+
+                    print(f"@{self.id}, expires at '{(datetime.datetime.now() + datetime.timedelta(seconds = scanning_wait._timeout)):%Y-%m-%d %H:%M:%S}'")
+                    qr.print_ascii(invert = True)
+
+                    scanning_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
+
+                else:
+                    for cookie in provider.value:
+                        driver.add_cookie(cookie)
+
+                    driver.refresh()
+                    loading_wait.until(EC.presence_of_element_located((By.XPATH, home_wrap_xpath)))
+
+                new_profile_a: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_a_xpath)))
+                new_profile_a_href: str = new_profile_a.get_attribute("href")
+
+                new_profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
+                new_profile_div_title: str = new_profile_div.get_attribute("title")
+
+                profile_id = re.search(r"/u/([0-9]+)$", new_profile_a_href).group(1)
+                profile_name = new_profile_div_title
 
         finally:
             driver.close()
             driver.switch_to.window(current)
+
+        _logger.info(
+            _format_message(
+                sender = _SYSTEM,
+                event = _EVENT_EXECUTION,
+                message = f"@{self.id} Init OK! -> ({profile_id}, '{profile_name}')",
+                root = True
+            )
+        )
 
         return self
 
