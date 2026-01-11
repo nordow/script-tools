@@ -1205,12 +1205,12 @@ class User:
         @sync
         def send_post(poster: Poster, kwargs: dict[str, Any]) -> bool:
 
-            def eval_vars(vars: dict[str, Any], builtins: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
+            def eval_vars(vars: dict[str, Any], bins: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
                 evaluated_vars: dict[str, Any] = {}
 
                 for var_name, var_expr in vars.items():
                     evaluated_var = _safe_eval(var_expr, {
-                        "builtins": builtins,
+                        "bins": bins,
                         "envs": envs,
                         "mods": mods,
                         "vars": evaluated_vars
@@ -1229,7 +1229,7 @@ class User:
 
             job_id: str = kwargs["id"]
 
-            builtins: dict[str, Any] = kwargs["builtins"]
+            bins: dict[str, Any] = kwargs["bins"]
             envs: dict[str, Any] = kwargs["envs"]
             mods: dict[str, Any] = kwargs["mods"]
             vars: dict[str, Any] = kwargs["vars"]
@@ -1239,10 +1239,10 @@ class User:
             templates: list[dict[str, Any] | str] | None = kwargs["templates"]
 
             job_kwargs = {
-                "builtins": builtins,
+                "bins": bins,
                 "envs": envs,
                 "mods": mods,
-                "vars": eval_vars(vars, builtins, envs, mods)
+                "vars": eval_vars(vars, bins, envs, mods)
             }
 
             real: bool
@@ -1297,7 +1297,7 @@ class User:
         timezone: str | None = conf.get("timezone", default_conf.get("timezone"))
         cookies: CookieProvider = CookieParser(name).parse(**(CookieValidator(name).validate(conf.get("cookies", default_conf["cookies"]))))
         features: FeatureProvider = FeatureBuilder(name).add_multi(conf.get("features", default_conf["features"])).build()
-        builtins: dict[str, Any] = {
+        bins: dict[str, Any] = {
             "features": features
         }
         envs: dict[str, Any] = copy.deepcopy({
@@ -1307,7 +1307,7 @@ class User:
         mods: dict[str, Any] = ModImporter(name).import_multi({key: ModValidator(f"{name}.{key}").validate(value) for key, value in {
             **(default_conf.get("mods", {})),
             **(conf.get("mods", {}))
-        }.items()}, lambda mods: { "builtins": builtins, "envs": envs, "mods": mods })
+        }.items()}, lambda mods: { "bins": bins, "envs": envs, "mods": mods })
         vars: dict[str, Any] = copy.deepcopy({
             **(default_conf.get("vars", {})),
             **(conf.get("vars", {}))
@@ -1332,7 +1332,7 @@ class User:
                 "kwargs": {
                     "id": job_id,
 
-                    "builtins": builtins,
+                    "bins": bins,
                     "envs": envs,
                     "mods": mods,
                     "vars": vars,
