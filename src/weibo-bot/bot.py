@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 from _thread import LockType
 from collections.abc import Callable
+from dependency_injector import containers, providers
 from enum import auto, Enum, Flag
 from http.cookies import SimpleCookie
 from logging import config
@@ -127,6 +128,9 @@ def _input_yes_no(prompt, default: bool | None = None) -> bool:
                 return True
             case _:
                 print("Invalid input, please enter 'yes' or 'no'")
+
+def _raise_exception(exception) -> None:
+    raise exception
 
 
 class FullCronTrigger(CronTrigger):
@@ -277,6 +281,26 @@ class TemplateValidator(Validator):
             }
         else:
             raise TypeError(f"Wrong type of template @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+
+
+class FeatureValidator(Validator):
+
+    def __init__(self, id: str) -> None:
+        super().__init__(id)
+
+    def validate(self, value) -> dict[str, Any]:
+        if isinstance(value, bool):
+            return {
+                "enabled": value
+            }
+        elif isinstance(value, dict):
+            return {
+                "enabled": value.get("enabled", True),
+
+                **value
+            }
+        else:
+            raise TypeError(f"Wrong type of feature @{self.id}; got '{type(value).__name__}', expected '{bool.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
 
 
 class _InternalCookiePolicy(Flag):
@@ -475,8 +499,6 @@ class Engine:
         self.__props = {}
         self.__lock = Lock()
 
-        self.__disposed = False
-
         options = webdriver.ChromeOptions()
 
         options.add_argument("--no-sandbox")
@@ -492,6 +514,8 @@ class Engine:
         driver.maximize_window()
 
         self.__driver = driver
+
+        self.__disposed = False
 
     @property
     def id(self) -> str:
@@ -520,6 +544,205 @@ class Engine:
         self.__driver = None
 
         self.__disposed = True
+
+
+class BrowserTab:
+    __engine: Engine
+    __handle: str
+
+    def __init__(self, engine: Engine, handle: str) -> None:
+        self.__engine = engine
+        self.__handle = handle
+
+        self.__execute_sync()
+
+    def __execute_sync(self): self.__execute = sync(self.__engine.lock)(self.__execute)
+    def __execute(self, method: Callable[[WebDriver], Any]) -> Any:
+        engine = self.__engine
+        handle = self.__handle
+
+        driver = engine.driver
+
+        current = driver.current_window_handle
+
+        if current == handle:
+            return method(driver)
+
+        driver.switch_to.window(handle)
+
+        try:
+            return method(driver)
+
+        finally:
+            driver.switch_to.window(current)
+
+    def get_user_agent(self) -> str:
+        return self.__execute(lambda driver: driver.execute_script("return navigator.userAgent"))
+
+    def get_url(self) -> str:
+        return self.__execute(lambda driver: driver.current_url)
+
+    def get_title(self) -> str:
+        return self.__execute(lambda driver: driver.title)
+
+    def get_cookie(self, name: str) -> dict | None:
+        return self.__execute(lambda driver: driver.get_cookie(name))
+
+    def get_cookies(self) -> list[dict]:
+        return self.__execute(lambda driver: driver.get_cookies())
+
+    def close(self) -> None:
+        self.__execute(lambda driver: driver.close())
+
+
+class Browser:
+    __engine: Engine
+
+    def __init__(self, engine: Engine) -> None:
+        self.__engine = engine
+
+        self.__open_tab_sync()
+
+    @property
+    def id(self) -> str:
+        return self.__engine.id
+
+    def __open_tab_sync(self): self.open_tab = sync(self.__engine.lock)(self.open_tab)
+    def open_tab(self, url: str) -> BrowserTab:
+        engine = self.__engine
+
+        driver = engine.driver
+
+        current = driver.current_window_handle
+        current_index = driver.window_handles.index(current)
+
+        driver.execute_script("window.open('about:blank', '_blank')")
+
+        new_handle = driver.window_handles[current_index + 1]
+
+        driver.switch_to.window(new_handle)
+
+        try:
+            driver.get(url)
+
+            return BrowserTab(engine, new_handle)
+
+        except:
+            driver.close()
+
+            raise
+
+        finally:
+            driver.switch_to.window(current)
+
+
+class FeatureProvider:
+
+    class __Container(containers.DeclarativeContainer):
+        config = providers.Configuration()
+
+        engine = providers.Resource(
+            lambda id: (
+                (yield (engine := Engine(id))),
+                engine.dispose()
+            ),
+            id = config.id)
+
+        browser = providers.Singleton(Browser, engine = engine)
+
+    __id: str
+
+    __container: __Container
+    __features: dict[str, Callable[[__Container], Any]]
+
+    __disposed: bool
+
+    def __init__(self, id: str, conf: dict[str, dict[str, Any]]) -> None:
+        self.__id = id
+
+        container = self.__Container()
+
+        container.config.from_dict({
+            "id": id,
+            "features": conf
+        })
+
+        self.__container = container
+        self.__features = {
+            "browser": (lambda container: container.browser())
+        }
+        self.__features = {
+            key: (lambda container: value(container)
+                  if hasattr(container.config.features, key) and getattr(container.config.features, key).enabled()
+                  else _raise_exception(RuntimeError(f"@{container.config.id()} feature '{key}' is not enabled")))
+                for key, value in self.__features.items()
+        }
+
+        self.__disposed = False
+
+    @property
+    def id(self) -> str:
+        return self.__id
+
+    def get(self, key: str) -> Any:
+        container = self.__container
+        features = self.__features
+
+        if not (feature := features.get(key, None)):
+            raise RuntimeError(f"@{container.config.id()} feature '{key}' is not supported")
+
+        return feature(container)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.get(key)
+
+    def dispose(self) -> None:
+        if self.__disposed:
+            return
+
+        container = self.__container
+
+        container.shutdown_resources()
+
+        self.__features = None
+        self.__container = None
+
+        self.__disposed = True
+
+
+class FeatureBuilder:
+    __id: str
+
+    __features: dict[str, dict[str, Any]]
+
+    def __init__(self, id: str) -> None:
+        self.__id = id
+
+        self.__features = {}
+
+    @property
+    def id(self) -> str:
+        return self.__id
+
+    def add_single(self, key: str, value: dict[str, Any] | bool):
+        features = self.__features
+
+        features[key] = FeatureValidator(f"{self.id}.{key}").validate(value)
+
+        return self
+
+    def add_multi(self, items: dict[str, dict[str, Any] | bool]):
+        features = self.__features
+
+        for key, value in items.items():
+            features[key] = FeatureValidator(f"{self.id}.{key}").validate(value)
+
+        return self
+
+    def build(self) -> FeatureProvider:
+        features = self.__features
+
+        return FeatureProvider(self.id, features)
 
 
 class Poster:
@@ -971,6 +1194,7 @@ class User:
     __name: str
     __preview: bool
 
+    __features: FeatureProvider
     __engine: Engine
     __scheduler: BaseScheduler
 
@@ -1068,13 +1292,14 @@ class User:
         self.__name = name
         self.__preview = preview
 
-        self.__disposed = False
-
         UserNameValidator(name).validate(name)
 
         timezone: str | None = conf.get("timezone", default_conf.get("timezone"))
         cookies: CookieProvider = CookieParser(name).parse(**(CookieValidator(name).validate(conf.get("cookies", default_conf["cookies"]))))
-        builtins: dict[str, Any] = {}
+        features: FeatureProvider = FeatureBuilder(name).add_multi(conf.get("features", default_conf["features"])).build()
+        builtins: dict[str, Any] = {
+            "features": features
+        }
         envs: dict[str, Any] = copy.deepcopy({
             **(default_conf.get("envs", {})),
             **(conf.get("envs", {}))
@@ -1185,8 +1410,11 @@ class User:
             events.EVENT_JOB_ERROR
         )
 
+        self.__features = features
         self.__engine = engine
         self.__scheduler = scheduler
+
+        self.__disposed = False
 
     @property
     def name(self) -> str:
@@ -1209,14 +1437,17 @@ class User:
         if self.__disposed:
             return
 
+        features = self.__features
         engine = self.__engine
         scheduler = self.__scheduler
 
         scheduler.shutdown(wait = False)
         engine.dispose()
+        features.dispose()
 
-        self.__engine = None
         self.__scheduler = None
+        self.__engine = None
+        self.__features = None
 
         self.__disposed = True
 

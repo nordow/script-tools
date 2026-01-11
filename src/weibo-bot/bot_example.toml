@@ -1,6 +1,7 @@
 [default]
 timezone = "Asia/Shanghai"
 cookies = "<default_cookies>"
+features.browser = true
 
 [default.envs]
 timezone = "Asia/Shanghai"
@@ -29,6 +30,10 @@ cron = "0 0/30 * * * *"
 jitter = 600
 select = "random"
 commands.pre = [
+    "mods['operator'].setitem(vars['caches'], 'blank_tab', builtins['features']['browser'].open_tab('about:blank'))",
+    "mods['operator'].setitem(vars['caches'], 'user_agent', vars['caches']['blank_tab'].get_user_agent())",
+    "vars['caches']['blank_tab'].close()",
+    "mods['operator'].delitem(vars['caches'], 'blank_tab')",
     "mods['operator'].setitem(vars['caches'], 'random_emoji', mods['random'].choice(envs['emojis']))"
 ]
 commands.success = "mods['do_nothing']()"
@@ -60,6 +65,9 @@ templates = [
 cookies.source = "string"
 cookies.type = "header"
 cookies.value = "<coder_cookies>"
+
+[coder.features]
+browser = { enabled = true }
 
 [coder.envs]
 hello = "World"
