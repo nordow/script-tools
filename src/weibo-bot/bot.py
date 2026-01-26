@@ -798,8 +798,8 @@ class Poster:
 
             cookie_policy: _InternalCookiePolicy
 
-            profile_a_xpath = '//div[@id="app"]/div[2]/div[1]/div/div[1]/div/div/div[2]/div/div[1]/a[5]'
-            profile_div_xpath = '//div[@id="app"]/div[2]/div[1]/div/div[1]/div/div/div[2]/div/div[1]/a[5]/div/div/div'
+            profile_a_xpath = '//div[@role="navigation"]/div/div/div[2]/div/div[1]/a[5]'
+            # profile_div_xpath = '//div[@role="navigation"]/div/div/div[2]/div/div[1]/a[5]/div/div/div'
 
             match provider.mode:
                 case CookieMode.INTERACTIVE:
@@ -807,11 +807,12 @@ class Poster:
                     current_profile_a_href: str | None = current_profile_a.get_attribute("href")
 
                     if current_profile_a_href is not None:
-                        current_profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
-                        current_profile_div_title: str = current_profile_div.get_attribute("title")
+                        # current_profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
+                        # current_profile_div_title: str = current_profile_div.get_attribute("title")
+                        current_profile_a_title: str = current_profile_a.get_attribute("title")
 
                         profile_id = re.search(r"/u/([0-9]+)$", current_profile_a_href).group(1)
-                        profile_name = current_profile_div_title
+                        profile_name = current_profile_a_title # current_profile_div_title
 
                         print(f"@{self.id} -> ({profile_id}, '{profile_name}')")
 
@@ -833,11 +834,12 @@ class Poster:
                     fallback_profile_a_href: str | None = fallback_profile_a.get_attribute("href")
 
                     if fallback_profile_a_href is not None:
-                        fallback_profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
-                        fallback_profile_div_title: str = fallback_profile_div.get_attribute("title")
+                        # fallback_profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
+                        # fallback_profile_div_title: str = fallback_profile_div.get_attribute("title")
+                        fallback_profile_a_title: str = fallback_profile_a.get_attribute("title")
 
                         profile_id = re.search(r"/u/([0-9]+)$", fallback_profile_a_href).group(1)
-                        profile_name = fallback_profile_div_title
+                        profile_name = fallback_profile_a_title # fallback_profile_div_title
 
                         cookie_policy = _InternalCookiePolicy.NONE
 
@@ -905,11 +907,12 @@ class Poster:
                 new_profile_a: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_a_xpath)))
                 new_profile_a_href: str = new_profile_a.get_attribute("href")
 
-                new_profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
-                new_profile_div_title: str = new_profile_div.get_attribute("title")
+                # new_profile_div: WebElement = loading_wait.until(EC.presence_of_element_located((By.XPATH, profile_div_xpath)))
+                # new_profile_div_title: str = new_profile_div.get_attribute("title")
+                new_profile_a_title: str = new_profile_a.get_attribute("title")
 
                 profile_id = re.search(r"/u/([0-9]+)$", new_profile_a_href).group(1)
-                profile_name = new_profile_div_title
+                profile_name = new_profile_a_title # new_profile_div_title
 
         finally:
             driver.close()
