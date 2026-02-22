@@ -10,6 +10,7 @@ import random
 import re
 import signal
 import sys
+import time
 import tomllib
 import urllib.parse
 import urllib.request
@@ -939,7 +940,10 @@ class Poster:
 
         match behavior:
             case None | "origin":
-                self.__send_origin(text, images, options)
+                if options.get("stopic") is not None:
+                    self.__send_origin_with_stopic(text, images, options)
+                else:
+                    self.__send_origin(text, images, options)
             case "repost":
                 self.__send_repost(text, images, options)
             case "comment":
@@ -1038,6 +1042,222 @@ class Poster:
             # send_button.click()
             driver.execute_script("arguments[0].click();", send_button)
             execution_wait.until(EC.element_attribute_to_include((By.XPATH, send_button_xpath), "disabled"))
+
+        finally:
+            driver.close()
+            driver.switch_to.window(current)
+
+    def __send_origin_with_stopic(self, text: str, images: list[str], options: dict[str, Any]) -> None:
+
+        def element_located_text_to_be(locator, text_):
+            """ An expectation for checking if the given text is the expected value in the
+            specified element.
+            locator, text
+            """
+
+            def _predicate(driver):
+                try:
+                    element_text = driver.find_element(*locator).text
+                    return text_ == element_text
+                except EX.StaleElementReferenceException:
+                    return False
+
+            return _predicate
+
+        def non_presence_of_element_located(locator):
+            """ An expectation for checking that an element is not present on the DOM
+            of a page.
+            locator - used to find the element
+            returns False if the element is present on the DOM, True otherwise.
+            """
+
+            def _predicate(driver):
+                try:
+                    driver.find_element(*locator)
+                    return False
+                except EX.NoSuchElementException:
+                    return True
+
+            return _predicate
+
+        if not images and (not text or text.isspace()):
+            raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace, if there is no images")
+
+        stopic: dict[str, Any]
+        stopic_value: dict[str, Any] | str = options.get("stopic")
+
+        if isinstance(stopic_value, str):
+            if not stopic_value or stopic_value.isspace():
+                raise ValueError(f"Wrong value of stopic @{self.id}; got {repr(stopic_value)}, expected not empty and not whitespace")
+
+            stopic = {
+                "title": stopic_value,
+                "sync": None
+            }
+
+        elif isinstance(stopic_value, dict):
+            stopic_title = stopic_value["title"]
+
+            if isinstance(stopic_title, str):
+                if not stopic_title or stopic_title.isspace():
+                    raise ValueError(f"Wrong value of stopic.title @{self.id}; got {repr(stopic_title)}, expected not empty and not whitespace")
+
+                stopic = {
+                    "title": stopic_title,
+                    "sync": bool(stopic_sync) if (stopic_sync := stopic_value.get("sync")) is not None else None
+                }
+
+            else:
+                raise TypeError(f"Wrong type of stopic.title @{self.id}; got '{type(stopic_title).__name__}', expected '{str.__name__}'")
+        else:
+            raise TypeError(f"Wrong type of stopic @{self.id}; got '{type(stopic_value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+
+        engine = self.__engine
+        preview = self.__preview
+
+        driver = engine.driver
+
+        if preview:
+            raise PreviewException(f"Preview over @{self.id}")
+
+        current = driver.current_window_handle
+        current_index = driver.window_handles.index(current)
+
+        driver.execute_script("window.open('https://weibo.com', '_blank')")
+        driver.switch_to.window(driver.window_handles[current_index + 1])
+
+        try:
+            element_wait = WebDriverWait(driver, 30)
+            execution_wait = WebDriverWait(driver, 15)
+
+            stopic_list_loading_delay = 0.5
+
+            vellipsis_div_xpath = '//div[@id="homeWrap"]/div[1]/div[1]/div[4]/div/div[1]/div/div[6]/div/span/div'
+            stopic_div_xpath = '//div[@id="homeWrap"]/div[1]/div[1]/div[4]/div/div[1]/div/div[6]/div/div/div/div[span/*[local-name()="svg" and namespace-uri()="http://www.w3.org/2000/svg"]/*[@*[local-name()="href" and namespace-uri()="http://www.w3.org/1999/xlink"]="#woo_svg_nav_stopic"]]'
+            stopic_modal_div_xpath = '/html/body/div[2]'
+            stopic_select_div_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[2]/div[1]/div[1]'
+            stopic_search_input_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[2]/div[1]/div[2]/div/div/div[1]/div/input'
+            stopic_list_none_span_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[2]/div[1]/div[2]/div/div/div[4]/div/span'
+            stopic_list_scroller_div_xpath = '//div[@id="scroller"]'
+            stopic_item_div_xpath = '//div[@id="scroller"]/div[2]/div[{index}]/div/div' # elements div[{index}]/div/div
+            stopic_item_text_div_xpath = '//div[@id="scroller"]/div[2]/div/div/div/div[2]/div[1]' # elements div[{index}]/div/div/div[2]/div[1]
+            stopic_title_span_xpath = '/html/body/div[2]/div[1]/div/div[1]/div/div[1]/span'
+            sync_label_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[2]/div[2]/label'
+            sync_input_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[2]/div[2]/label/input'
+            text_textarea_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[1]/textarea'
+            send_button_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[3]/div[2]/div[5]/button'
+
+            # 1
+            driver.execute_script("arguments[0].click();", element_wait.until(EC.element_to_be_clickable((By.XPATH, vellipsis_div_xpath))))
+
+            # 2
+            driver.execute_script("arguments[0].click();", element_wait.until(EC.element_to_be_clickable((By.XPATH, stopic_div_xpath))))
+            execution_wait.until(EC.presence_of_element_located((By.XPATH, stopic_modal_div_xpath)))
+
+            # 3
+            driver.execute_script("arguments[0].click();", element_wait.until(EC.element_to_be_clickable((By.XPATH, stopic_select_div_xpath))))
+
+            # 4
+            stopic_search_input: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, stopic_search_input_xpath)))
+
+            # stopic_search_input.clear()
+            stopic_search_input.send_keys(Keys.CONTROL, "A")
+            stopic_search_input.send_keys(Keys.DELETE)
+
+            stopic_search_input.send_keys(stopic["title"] + " ") # this space is necessary!
+            time.sleep(stopic_list_loading_delay)
+            execution_wait.until(EC.any_of(
+                EC.presence_of_element_located((By.XPATH, stopic_list_scroller_div_xpath)),
+                EC.presence_of_element_located((By.XPATH, stopic_list_none_span_xpath))))
+
+            stopic_search_input.send_keys(Keys.BACKSPACE) # refresh
+            time.sleep(stopic_list_loading_delay)
+            execution_wait.until(EC.any_of(
+                EC.presence_of_element_located((By.XPATH, stopic_list_scroller_div_xpath)),
+                EC.presence_of_element_located((By.XPATH, stopic_list_none_span_xpath))))
+
+            # 5
+            stopic_item_text_div_list: list[WebElement] | WebElement = element_wait.until(EC.any_of(
+                EC.presence_of_all_elements_located((By.XPATH, stopic_item_text_div_xpath)),
+                EC.presence_of_element_located((By.XPATH, stopic_list_none_span_xpath))))
+
+            stopic_item_div: WebElement | None = None
+
+            if isinstance(stopic_item_text_div_list, list):
+                for index in range(len(stopic_item_text_div_list)):
+                    stopic_item_text_div = stopic_item_text_div_list[index]
+
+                    if stopic_item_text_div.text == stopic["title"]:
+                        stopic_item_div = element_wait.until(EC.presence_of_element_located((By.XPATH, stopic_item_div_xpath.format(index = 1 + index))))
+
+                        break
+
+            if stopic_item_div is None:
+                raise ValueError(f"Cannot find a stopic by stopic.title {repr(stopic['title'])} @{self.id}, please check the stopic options")
+
+            driver.execute_script("arguments[0].click();", execution_wait.until(EC.element_to_be_clickable(stopic_item_div)))
+            execution_wait.until(element_located_text_to_be((By.XPATH, stopic_title_span_xpath), stopic["title"]))
+
+            # 6
+            if stopic["sync"] is not None:
+                sync_input: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, sync_input_xpath)))
+
+                if stopic["sync"] != sync_input.is_selected():
+                    driver.execute_script("arguments[0].click();", execution_wait.until(EC.element_to_be_clickable((By.XPATH, sync_label_xpath))))
+                    execution_wait.until(EC.element_selection_state_to_be(sync_input, stopic["sync"]))
+
+            # 7
+            text_textarea: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, text_textarea_xpath)))
+            send_button: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, send_button_xpath)))
+
+            # text_textarea.clear()
+            text_textarea.send_keys(Keys.CONTROL, "A")
+            text_textarea.send_keys(Keys.DELETE)
+            execution_wait.until(EC.element_attribute_to_include((By.XPATH, send_button_xpath), "disabled"))
+
+            # 8
+            if images:
+                file_input_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[3]/div[1]/div/div/div[{index}]/div/div/input'
+
+                file_input: WebElement = element_wait.until(EC.presence_of_element_located((By.XPATH, file_input_xpath.format(index = 1))))
+                file_input_accept: str = file_input.get_attribute("accept")
+
+                files: list[tuple[str, bool]] = []
+
+                try:
+                    for image in images:
+                        files.append((os.path.abspath(image), False) if os.path.isfile(image) else (urllib.request.urlretrieve(image)[0], True))
+
+                    file_input.send_keys("\n".join((file[0] for file in files)))
+                    execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+                    upload_wait = WebDriverWait(driver, 60)
+
+                    item_div_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[3]/div[1]/div/div/div'
+                    loading_svg_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[3]/div[1]/div/div/div[{index}]/div/div[1]/svg'
+                    cover_img_xpath = '/html/body/div[2]/div[1]/div/div[2]/div[3]/div[1]/div/div/div[{index}]/div/div[1]/img'
+
+                    file_div_list: list[WebElement] = execution_wait.until(EC.presence_of_all_elements_located((By.XPATH, item_div_xpath)))[:-1]
+
+                    if (files_diff := len(files) - len(file_div_list)) > 0:
+                        raise ValueError(f"Find {files_diff} unacceptable image(s) @{self.id}; got {images}, expected [images]{{0,18}}, accepted {repr(file_input_accept)}")
+
+                    for index in range(len(file_div_list)):
+                        upload_wait.until(EC.all_of(
+                            non_presence_of_element_located((By.XPATH, loading_svg_xpath.format(index = 1 + index))),
+                            EC.presence_of_element_located((By.XPATH, cover_img_xpath.format(index = 1 + index)))))
+
+                finally:
+                    for path in (file[0] for file in files if file[1]):
+                        _try_delete_file(path)
+
+            # 9
+            text_textarea.send_keys(text)
+            execution_wait.until(EC.element_to_be_clickable((By.XPATH, send_button_xpath)))
+
+            # send_button.click()
+            driver.execute_script("arguments[0].click();", send_button)
+            execution_wait.until(non_presence_of_element_located((By.XPATH, stopic_modal_div_xpath)))
 
         finally:
             driver.close()

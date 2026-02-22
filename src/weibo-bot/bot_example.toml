@@ -47,7 +47,9 @@ templates = [
     { text = "<5> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options.behavior = "origin" },
     { text = "<6> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options.behavior = "repost", options.keep_quote = true, options.comment = true, options.quote = { uid = "...", bid = "..." } },
     { text = "<7> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options.behavior = "comment", options.repost = true, options.quote = { uid = "...", bid = "..." } },
-    { text = "<8> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options = "envs['default_options']" }
+    { text = "<8> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options = "envs['default_options']" },
+    { text = "<9> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options.behavior = "origin", options.stopic = "..." },
+    { text = "<10> Now: {vars['now']:%H:%M}, {envs['hello']} {envs['world']}! {vars['caches']['random_emoji']}", options.behavior = "origin", options.stopic = { title = "...", sync = true } }
 ]
 
 [default.jobs.double]
