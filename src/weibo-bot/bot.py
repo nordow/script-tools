@@ -564,18 +564,12 @@ class BrowserTab:
 
         driver = engine.driver
 
-        current = driver.current_window_handle
-
-        if current == handle:
-            return method(driver)
-
         driver.switch_to.window(handle)
 
-        try:
-            return method(driver)
+        return method(driver)
 
-        finally:
-            driver.switch_to.window(current)
+    def focus(self) -> None:
+        self.__execute(lambda driver: None)
 
     def get_user_agent(self) -> str:
         return self.__execute(lambda driver: driver.execute_script("return navigator.userAgent"))
@@ -630,11 +624,9 @@ class Browser:
 
         except:
             driver.close()
+            driver.switch_to.window(current)
 
             raise
-
-        finally:
-            driver.switch_to.window(current)
 
 
 class FeatureProvider:
