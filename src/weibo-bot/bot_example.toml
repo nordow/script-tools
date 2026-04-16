@@ -21,6 +21,7 @@ do_nothing = { type = "expression", value = "lambda: None" }
 
 [default.vars]
 bins_count = "len(bins)"
+data_dir = "bins['paths']['data']" # assets, cache, data, logs, mods, res
 now = "mods['datetime'].datetime.now(mods['current_timezone'])"
 week = "vars['now'].weekday()"
 caches = "{}"

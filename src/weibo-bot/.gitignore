@@ -1,4 +1,9 @@
+assets/
+cache/
+data/
 logs/
+mods/
+res/
 
 *.toml
 

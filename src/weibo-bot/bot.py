@@ -486,6 +486,47 @@ class TemplateSelector:
         return template
 
 
+class PathProvider:
+    __id: str
+
+    __folders: list[str]
+
+    __base_dir: str
+
+    def __init__(self, id: str) -> None:
+        self.__id = id
+
+        self.__folders = [
+            "assets",
+            "cache",
+            "data",
+            "logs",
+            "mods",
+            "res"
+        ]
+
+        self.__base_dir = os.path.abspath(os.path.dirname(__file__))
+
+    @property
+    def id(self) -> str:
+        return self.__id
+
+    def get(self, folder: str) -> str:
+        folders = self.__folders
+
+        if folder not in folders:
+            raise ValueError(f"Wrong value of folder @{self.id}; got {repr(folder)}, expected { ' or '.join([repr(item) for item in folders]) }")
+
+        folder_path = os.path.join(self.__base_dir, folder)
+
+        os.makedirs(folder_path, exist_ok = True)
+
+        return folder_path
+
+    def __getitem__(self, key: str) -> str:
+        return self.get(key)
+
+
 class Engine:
     __id: str
     __driver: WebDriver
@@ -1409,6 +1450,7 @@ class User:
     __name: str
     __preview: bool
 
+    __paths: PathProvider
     __features: FeatureProvider
     __engine: Engine
     __scheduler: BaseScheduler
@@ -1512,8 +1554,10 @@ class User:
         timezone: str | None = conf.get("timezone", default_conf.get("timezone"))
         cookies: CookieProvider = CookieParser(name).parse(**(CookieValidator(name).validate(conf.get("cookies", default_conf["cookies"]))))
         features: FeatureProvider = FeatureBuilder(name).add_multi(conf.get("features", default_conf["features"])).build()
+        paths: PathProvider = PathProvider(name)
         bins: dict[str, Any] = {
-            "features": features
+            "features": features,
+            "paths": paths
         }
         envs: dict[str, Any] = copy.deepcopy({
             **(default_conf.get("envs", {})),
@@ -1625,6 +1669,7 @@ class User:
             events.EVENT_JOB_ERROR
         )
 
+        self.__paths = paths
         self.__features = features
         self.__engine = engine
         self.__scheduler = scheduler
@@ -1663,6 +1708,7 @@ class User:
         self.__scheduler = None
         self.__engine = None
         self.__features = None
+        self.__paths = None
 
         self.__disposed = True
 
