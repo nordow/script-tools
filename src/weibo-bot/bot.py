@@ -205,7 +205,7 @@ class CookieValidator(Validator):
                 "mode": value.get("mode")
             }
         else:
-            raise TypeError(f"Wrong type of cookies @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+            raise TypeError(f"Wrong type of cookies @{self.id}; got {type(value)}, expected <{dict[str, Any] | str}>")
 
 
 class ModValidator(Validator):
@@ -225,7 +225,7 @@ class ModValidator(Validator):
                 "value": value["value"]
             }
         else:
-            raise TypeError(f"Wrong type of mod @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+            raise TypeError(f"Wrong type of mod @{self.id}; got {type(value)}, expected <{dict[str, Any] | str}>")
 
 
 class JobNameValidator(Validator):
@@ -259,7 +259,7 @@ class CommandValidator(Validator):
         elif isinstance(group_commands, list):
             return group_commands
         else:
-            raise TypeError(f"Wrong type of {group} commands @{self.id}; got '{type(group_commands).__name__}', expected '{str.__name__}' or '{list.__name__}[{str.__name__}]'")
+            raise TypeError(f"Wrong type of {group} commands @{self.id}; got {type(group_commands)}, expected <{list[str] | str}>")
 
 
 class TemplateValidator(Validator):
@@ -281,7 +281,7 @@ class TemplateValidator(Validator):
                 "options": value.get("options", {})
             }
         else:
-            raise TypeError(f"Wrong type of template @{self.id}; got '{type(value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+            raise TypeError(f"Wrong type of template @{self.id}; got {type(value)}, expected <{dict[str, Any] | str}>")
 
 
 class FeatureValidator(Validator):
@@ -301,7 +301,7 @@ class FeatureValidator(Validator):
                 **value
             }
         else:
-            raise TypeError(f"Wrong type of feature @{self.id}; got '{type(value).__name__}', expected '{bool.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+            raise TypeError(f"Wrong type of feature @{self.id}; got {type(value)}, expected <{dict[str, Any] | bool}>")
 
 
 class _InternalCookiePolicy(Flag):
@@ -364,7 +364,7 @@ class CookieParser:
                 with open(value, "r") as f:
                     actual_value = f.read()
             case _:
-                raise ValueError(f"Wrong value of cookies source @{self.id}; got {repr(source)}, expected 'string' or 'file'")
+                raise ValueError(f"Wrong value of cookies source @{self.id}; got {repr(source)}, expected in {repr(['string', 'file'])}")
 
         cookies: list[dict[str, Any]] | None
         options: dict[str, Any] | None
@@ -386,7 +386,7 @@ class CookieParser:
             case "live":
                 cookies, options = None, json.loads(actual_value)
             case _:
-                raise ValueError(f"Wrong value of cookies type @{self.id}; got {repr(type)}, expected 'header' or 'json'")
+                raise ValueError(f"Wrong value of cookies type @{self.id}; got {repr(type)}, expected in {repr(['header', 'json', 'live'])}")
 
         if cookies is not None:
             for cookie in cookies:
@@ -405,7 +405,7 @@ class CookieParser:
             case "migrate":
                 actual_mode = CookieMode.MIGRATE
             case _:
-                raise ValueError(f"Wrong value of cookies mode @{self.id}; got {repr(mode)}, expected 'interactive' or 'fallback' or 'override' or 'migrate'")
+                raise ValueError(f"Wrong value of cookies mode @{self.id}; got {repr(mode)}, expected in {repr(['interactive', 'fallback', 'override', 'migrate'])}")
 
         return CookieProvider(cookies, actual_mode, options)
 
@@ -432,7 +432,7 @@ class ModImporter:
             case "expression":
                 mod = _safe_eval(value, context)
             case _:
-                raise ValueError(f"Wrong value of type @{self.id}; got {repr(type)}, expected 'module' or 'expression'")
+                raise ValueError(f"Wrong value of type @{self.id}; got {repr(type)}, expected in {repr(['module', 'expression'])}")
 
         return mod
 
@@ -454,7 +454,7 @@ class ModImporter:
                 case "expression":
                     mod = _safe_eval(value, context)
                 case _:
-                    raise ValueError(f"Wrong value of type for mod {repr(name)} @{self.id}; got {repr(type)}, expected 'module' or 'expression'")
+                    raise ValueError(f"Wrong value of type for mod {repr(name)} @{self.id}; got {repr(type)}, expected in {repr(['module', 'expression'])}")
 
             mods[name] = mod
 
@@ -481,7 +481,7 @@ class TemplateSelector:
             case None | "random":
                 template = random.choice(templates)
             case _:
-                raise ValueError(f"Wrong value of select mode @{self.id}; got {repr(mode)}, expected 'random'")
+                raise ValueError(f"Wrong value of select mode @{self.id}; got {repr(mode)}, expected in {repr(['random'])}")
 
         return template
 
@@ -515,7 +515,7 @@ class PathProvider:
         folders = self.__folders
 
         if folder not in folders:
-            raise ValueError(f"Wrong value of folder @{self.id}; got {repr(folder)}, expected { ' or '.join([repr(item) for item in folders]) }")
+            raise ValueError(f"Wrong value of folder @{self.id}; got {repr(folder)}, expected in {repr(folders)}")
 
         folder_path = os.path.join(self.__base_dir, folder)
 
@@ -708,7 +708,7 @@ class FeatureProvider:
         self.__features = {
             key: (lambda container: value(container)
                   if hasattr(container.config.features, key) and getattr(container.config.features, key).enabled()
-                  else _raise_exception(RuntimeError(f"@{container.config.id()} feature '{key}' is not enabled")))
+                  else _raise_exception(RuntimeError(f"@{container.config.id()} feature {repr(key)} is not enabled")))
                 for key, value in self.__features.items()
         }
 
@@ -723,7 +723,7 @@ class FeatureProvider:
         features = self.__features
 
         if not (feature := features.get(key, None)):
-            raise RuntimeError(f"@{container.config.id()} feature '{key}' is not supported")
+            raise RuntimeError(f"@{container.config.id()} feature {repr(key)} is not supported")
 
         return feature(container)
 
@@ -887,7 +887,7 @@ class Poster:
 
                 # never
                 case _:
-                    raise ValueError(f"Wrong value of provider.mode @{self.id}; got {repr(provider.mode)}, expected 'interactive' or 'fallback' or 'override' or 'migrate'")
+                    raise ValueError(f"Wrong value of provider.mode @{self.id}; got {repr(provider.mode)}, expected in {repr(['interactive', 'fallback', 'override', 'migrate'])}")
 
             if _InternalCookiePolicy.SANITIZE in cookie_policy:
                 driver.get("https://login.sina.com.cn/sso/logout.php?entry=miniblog&r=")
@@ -982,7 +982,7 @@ class Poster:
             case "comment":
                 self.__send_comment(text, images, options)
             case _:
-                raise ValueError(f"Wrong value of behavior @{self.id}; got {repr(behavior)}, expected 'origin' or 'repost' or 'comment'")
+                raise ValueError(f"Wrong value of behavior @{self.id}; got {repr(behavior)}, expected in {repr(['origin', 'repost', 'comment'])}")
 
     def __send_origin(self, text: str, images: list[str], options: dict[str, Any]) -> None:
 
@@ -1141,9 +1141,9 @@ class Poster:
                 }
 
             else:
-                raise TypeError(f"Wrong type of stopic.title @{self.id}; got '{type(stopic_title).__name__}', expected '{str.__name__}'")
+                raise TypeError(f"Wrong type of stopic.title @{self.id}; got {type(stopic_title)}, expected {str}")
         else:
-            raise TypeError(f"Wrong type of stopic @{self.id}; got '{type(stopic_value).__name__}', expected '{str.__name__}' or '{dict.__name__}[{str.__name__}, Any]'")
+            raise TypeError(f"Wrong type of stopic @{self.id}; got {type(stopic_value)}, expected <{dict[str, Any] | str}>")
 
         engine = self.__engine
         preview = self.__preview
