@@ -15,6 +15,7 @@ import tomllib
 import urllib.parse
 import urllib.request
 from _thread import LockType
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dependency_injector import containers, providers
 from enum import auto, Enum, Flag
@@ -588,6 +589,34 @@ class Engine:
         self.__disposed = True
 
 
+class CDPClient(ABC):
+
+    @abstractmethod
+    def send_cdp(self, method: str, params: dict):
+        pass
+
+
+class Console(CDPClient):
+    __engine: Engine
+
+    def __init__(self, engine: Engine) -> None:
+        self.__engine = engine
+
+        self.__send_cdp_sync()
+
+    @property
+    def id(self) -> str:
+        return self.__engine.id
+
+    def __send_cdp_sync(self): self.send_cdp = sync(self.__engine.lock)(self.send_cdp)
+    def send_cdp(self, method: str, params: dict):
+        engine = self.__engine
+
+        driver = engine.driver
+
+        return driver.execute_cdp_cmd(method, params)
+
+
 class BrowserTab:
     __engine: Engine
     __handle: str
@@ -631,17 +660,26 @@ class BrowserTab:
         self.__execute(lambda driver: driver.close())
 
 
-class Browser:
+class Browser(CDPClient):
     __engine: Engine
 
     def __init__(self, engine: Engine) -> None:
         self.__engine = engine
 
+        self.__send_cdp_sync()
         self.__open_tab_sync()
 
     @property
     def id(self) -> str:
         return self.__engine.id
+
+    def __send_cdp_sync(self): self.send_cdp = sync(self.__engine.lock)(self.send_cdp)
+    def send_cdp(self, method: str, params: dict):
+        engine = self.__engine
+
+        driver = engine.driver
+
+        return driver.execute_cdp_cmd(method, params)
 
     def __open_tab_sync(self): self.open_tab = sync(self.__engine.lock)(self.open_tab)
     def open_tab(self, url: str) -> BrowserTab:
@@ -1453,6 +1491,7 @@ class User:
     __paths: PathProvider
     __features: FeatureProvider
     __engine: Engine
+    __console: Console
     __scheduler: BaseScheduler
 
     __disposed: bool
@@ -1555,9 +1594,12 @@ class User:
         cookies: CookieProvider = CookieParser(name).parse(**(CookieValidator(name).validate(conf.get("cookies", default_conf["cookies"]))))
         features: FeatureProvider = FeatureBuilder(name).add_multi(conf.get("features", default_conf["features"])).build()
         paths: PathProvider = PathProvider(name)
+        engine = Engine(name)
+        console = Console(engine)
         bins: dict[str, Any] = {
             "features": features,
-            "paths": paths
+            "paths": paths,
+            "console": console
         }
         envs: dict[str, Any] = copy.deepcopy({
             **(default_conf.get("envs", {})),
@@ -1572,7 +1614,6 @@ class User:
             **(conf.get("vars", {}))
         })
         jobs: dict[str, dict[str, Any]] = conf.get("jobs", default_conf.get("jobs", {}))
-        engine = Engine(name)
         poster = Poster(engine, preview).with_cookies(cookies)
         scheduler = BackgroundScheduler()
 
@@ -1672,6 +1713,7 @@ class User:
         self.__paths = paths
         self.__features = features
         self.__engine = engine
+        self.__console = console
         self.__scheduler = scheduler
 
         self.__disposed = False
@@ -1706,6 +1748,7 @@ class User:
         features.dispose()
 
         self.__scheduler = None
+        self.__console = None
         self.__engine = None
         self.__features = None
         self.__paths = None

@@ -22,6 +22,8 @@ do_nothing = { type = "expression", value = "lambda: None" }
 [default.vars]
 bins_count = "len(bins)"
 data_dir = "bins['paths']['data']" # assets, cache, data, logs, mods, res
+cs_cdp_two = "bins['console'].send_cdp('Runtime.evaluate', { 'expression': '1 + 1', 'returnByValue': True })['result']['value']"
+bs_cdp_two = "bins['features']['browser'].send_cdp('Runtime.evaluate', { 'expression': '1 + 1', 'returnByValue': True })['result']['value']"
 now = "mods['datetime'].datetime.now(mods['current_timezone'])"
 week = "vars['now'].weekday()"
 caches = "{}"
