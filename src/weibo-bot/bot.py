@@ -1590,131 +1590,146 @@ class User:
 
         UserNameValidator(name).validate(name)
 
-        timezone: str | None = conf.get("timezone", default_conf.get("timezone"))
-        cookies: CookieProvider = CookieParser(name).parse(**(CookieValidator(name).validate(conf.get("cookies", default_conf["cookies"]))))
-        features: FeatureProvider = FeatureBuilder(name).add_multi(conf.get("features", default_conf["features"])).build()
-        paths: PathProvider = PathProvider(name)
-        engine = Engine(name)
-        console = Console(engine)
-        bins: dict[str, Any] = {
-            "features": features,
-            "paths": paths,
-            "console": console
-        }
-        envs: dict[str, Any] = copy.deepcopy({
-            **(default_conf.get("envs", {})),
-            **(conf.get("envs", {}))
-        })
-        mods: dict[str, Any] = ModImporter(name).import_multi({key: ModValidator(f"{name}.{key}").validate(value) for key, value in {
-            **(default_conf.get("mods", {})),
-            **(conf.get("mods", {}))
-        }.items()}, lambda mods: { "bins": bins, "envs": envs, "mods": mods })
-        vars: dict[str, Any] = copy.deepcopy({
-            **(default_conf.get("vars", {})),
-            **(conf.get("vars", {}))
-        })
-        jobs: dict[str, dict[str, Any]] = conf.get("jobs", default_conf.get("jobs", {}))
-        poster = Poster(engine, preview).with_cookies(cookies)
-        scheduler = BackgroundScheduler()
+        paths: PathProvider = None
+        features: FeatureProvider = None
+        engine: Engine = None
+        console: Console = None
+        scheduler: BaseScheduler = None
 
-        for job_name, job_conf in jobs.items():
-            JobNameValidator(name).validate(job_name)
+        try:
+            timezone: str | None = conf.get("timezone", default_conf.get("timezone"))
+            cookies: CookieProvider = CookieParser(name).parse(**(CookieValidator(name).validate(conf.get("cookies", default_conf["cookies"]))))
 
-            job_id = f"{name}.{job_name}"
+            features = FeatureBuilder(name).add_multi(conf.get("features", default_conf["features"])).build()
+            paths = PathProvider(name)
+            engine = Engine(name)
+            console = Console(engine)
 
-            job_cron: str = job_conf["cron"]
-            job_jitter: int | None = job_conf.get("jitter")
-            job_select: str | None = job_conf.get("select")
-            job_commands: dict[str, Any] | None = job_conf.get("commands")
-            job_templates: list[dict[str, Any] | str] | None = job_conf.get("templates")
+            bins: dict[str, Any] = {
+                "features": features,
+                "paths": paths,
+                "console": console
+            }
+            envs: dict[str, Any] = copy.deepcopy({
+                **(default_conf.get("envs", {})),
+                **(conf.get("envs", {}))
+            })
+            mods: dict[str, Any] = ModImporter(name).import_multi({key: ModValidator(f"{name}.{key}").validate(value) for key, value in {
+                **(default_conf.get("mods", {})),
+                **(conf.get("mods", {}))
+            }.items()}, lambda mods: { "bins": bins, "envs": envs, "mods": mods })
+            vars: dict[str, Any] = copy.deepcopy({
+                **(default_conf.get("vars", {})),
+                **(conf.get("vars", {}))
+            })
+            jobs: dict[str, dict[str, Any]] = conf.get("jobs", default_conf.get("jobs", {}))
+            poster = Poster(engine, preview).with_cookies(cookies)
+            scheduler = BackgroundScheduler()
 
-            scheduler.add_job(send_post, FullCronTrigger.from_cron(job_cron, timezone, job_jitter), kwargs = {
-                "kwargs": {
-                    "id": job_id,
+            for job_name, job_conf in jobs.items():
+                JobNameValidator(name).validate(job_name)
 
-                    "bins": bins,
-                    "envs": envs,
-                    "mods": mods,
-                    "vars": vars,
+                job_id = f"{name}.{job_name}"
 
-                    "select": job_select,
-                    "commands": job_commands,
-                    "templates": job_templates,
-                },
+                job_cron: str = job_conf["cron"]
+                job_jitter: int | None = job_conf.get("jitter")
+                job_select: str | None = job_conf.get("select")
+                job_commands: dict[str, Any] | None = job_conf.get("commands")
+                job_templates: list[dict[str, Any] | str] | None = job_conf.get("templates")
 
-                "poster": poster
-            }, id = job_id)
+                scheduler.add_job(send_post, FullCronTrigger.from_cron(job_cron, timezone, job_jitter), kwargs = {
+                    "kwargs": {
+                        "id": job_id,
 
-        scheduler.add_listener(
-            lambda event: (_logger.info(
-                _format_message(
-                    sender = event.job_id,
-                    event = _EVENT_EXECUTION,
-                    message = "Success!" if event.retval else "Preview over!"
-                )
-            ), _logger.info(
-                _format_message(
-                    sender = event.job_id,
-                    event = _EVENT_NOTIFICATION,
-                    message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
-                )
-            )),
-            events.EVENT_JOB_EXECUTED
-        )
-        scheduler.add_listener(
-            lambda event: (_logger.warning(
-                _format_message(
-                    sender = event.job_id,
-                    event = _EVENT_EXECUTION,
-                    message = f"The job scheduled for '{event.scheduled_run_time:%Y-%m-%d %H:%M:%S}' has missed!"
-                )
-            ), _logger.info(
-                _format_message(
-                    sender = event.job_id,
-                    event = _EVENT_NOTIFICATION,
-                    message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
-                )
-            )),
-            events.EVENT_JOB_MISSED
-        )
-        scheduler.add_listener(
-            lambda event: (_logger.warning(
-                _format_message(
-                    sender = event.job_id,
-                    event = _EVENT_EXECUTION,
-                    message = f"The job scheduled for {[f'{scheduled_run_time:%Y-%m-%d %H:%M:%S}' for scheduled_run_time in event.scheduled_run_times]} has skipped!"
-                )
-            ), _logger.info(
-                _format_message(
-                    sender = event.job_id,
-                    event = _EVENT_NOTIFICATION,
-                    message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
-                )
-            )),
-            events.EVENT_JOB_MAX_INSTANCES
-        )
-        scheduler.add_listener(
-            lambda event: (_logger.error(
-                _format_message(
-                    sender = event.job_id,
-                    event = _EVENT_EXECUTION,
-                    message = f"Oops, an error occurred! -> {repr(event.exception)}"
-                )
-            ), _logger.info(
-                _format_message(
-                    sender = event.job_id,
-                    event = _EVENT_NOTIFICATION,
-                    message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
-                )
-            )),
-            events.EVENT_JOB_ERROR
-        )
+                        "bins": bins,
+                        "envs": envs,
+                        "mods": mods,
+                        "vars": vars,
 
-        self.__paths = paths
-        self.__features = features
-        self.__engine = engine
-        self.__console = console
-        self.__scheduler = scheduler
+                        "select": job_select,
+                        "commands": job_commands,
+                        "templates": job_templates,
+                    },
+
+                    "poster": poster
+                }, id = job_id)
+
+            scheduler.add_listener(
+                lambda event: (_logger.info(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_EXECUTION,
+                        message = "Success!" if event.retval else "Preview over!"
+                    )
+                ), _logger.info(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_NOTIFICATION,
+                        message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
+                    )
+                )),
+                events.EVENT_JOB_EXECUTED
+            )
+            scheduler.add_listener(
+                lambda event: (_logger.warning(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_EXECUTION,
+                        message = f"The job scheduled for '{event.scheduled_run_time:%Y-%m-%d %H:%M:%S}' has missed!"
+                    )
+                ), _logger.info(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_NOTIFICATION,
+                        message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
+                    )
+                )),
+                events.EVENT_JOB_MISSED
+            )
+            scheduler.add_listener(
+                lambda event: (_logger.warning(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_EXECUTION,
+                        message = f"The job scheduled for {[f'{scheduled_run_time:%Y-%m-%d %H:%M:%S}' for scheduled_run_time in event.scheduled_run_times]} has skipped!"
+                    )
+                ), _logger.info(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_NOTIFICATION,
+                        message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
+                    )
+                )),
+                events.EVENT_JOB_MAX_INSTANCES
+            )
+            scheduler.add_listener(
+                lambda event: (_logger.error(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_EXECUTION,
+                        message = f"Oops, an error occurred! -> {repr(event.exception)}"
+                    )
+                ), _logger.info(
+                    _format_message(
+                        sender = event.job_id,
+                        event = _EVENT_NOTIFICATION,
+                        message = f"The next job is scheduled for '{scheduler.get_job(event.job_id).next_run_time:%Y-%m-%d %H:%M:%S}'"
+                    )
+                )),
+                events.EVENT_JOB_ERROR
+            )
+
+            self.__paths = paths
+            self.__features = features
+            self.__engine = engine
+            self.__console = console
+            self.__scheduler = scheduler
+
+        except:
+            engine and engine.dispose()
+            features and features.dispose()
+
+            raise
 
         self.__disposed = False
 
@@ -1743,7 +1758,7 @@ class User:
         engine = self.__engine
         scheduler = self.__scheduler
 
-        scheduler.shutdown(wait = False)
+        scheduler.running and scheduler.shutdown(wait = False)
         engine.dispose()
         features.dispose()
 
