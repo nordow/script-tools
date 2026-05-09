@@ -550,7 +550,8 @@ class Engine:
         # options.add_argument("--incognito")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument(f"--user-data-dir={os.path.expanduser('~/.config/google-chrome')}")
+        # options.add_argument(f"--user-data-dir={os.path.expanduser('~/.config/google-chrome')}")
+        options.add_argument(f"--user-data-dir={os.path.join(PathProvider(id)['data'], 'engine')}")
         options.add_argument(f"--profile-directory={id}")
 
         driver = webdriver.Chrome(options = options)
