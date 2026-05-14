@@ -155,7 +155,7 @@ class FullCronTrigger(CronTrigger):
                 raise ValueError(f"Wrong number of fields; got {len(values)}, expected 5 or 6 or 7")
 
 
-class PreviewException(Exception):
+class PreviewAbort(Exception):
     pass
 
 
@@ -1051,7 +1051,7 @@ class Poster:
         driver = engine.driver
 
         if preview:
-            raise PreviewException(f"Preview over @{self.id}")
+            raise PreviewAbort(f"Preview over @{self.id}")
 
         current = driver.current_window_handle
         current_index = driver.window_handles.index(current)
@@ -1191,7 +1191,7 @@ class Poster:
         driver = engine.driver
 
         if preview:
-            raise PreviewException(f"Preview over @{self.id}")
+            raise PreviewAbort(f"Preview over @{self.id}")
 
         current = driver.current_window_handle
         current_index = driver.window_handles.index(current)
@@ -1369,7 +1369,7 @@ class Poster:
         driver = engine.driver
 
         if preview:
-            raise PreviewException(f"Preview over @{self.id}")
+            raise PreviewAbort(f"Preview over @{self.id}")
 
         current = driver.current_window_handle
         current_index = driver.window_handles.index(current)
@@ -1439,7 +1439,7 @@ class Poster:
         driver = engine.driver
 
         if preview:
-            raise PreviewException(f"Preview over @{self.id}")
+            raise PreviewAbort(f"Preview over @{self.id}")
 
         current = driver.current_window_handle
         current_index = driver.window_handles.index(current)
@@ -1569,7 +1569,7 @@ class User:
 
                 try:
                     poster.send(text = text, images = images, options = options)
-                except PreviewException:
+                except PreviewAbort:
                     real = False
                 else:
                     real = True
