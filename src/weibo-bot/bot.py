@@ -99,7 +99,7 @@ def _safe_eval(expr: str, globals: dict[str, Any] | None = None, locals: dict[st
     }, locals)
 
 def _format_fstring(fstring: str, **kwargs) -> str:
-    return _safe_eval(f'f{repr(fstring)}', kwargs)
+    return _safe_eval(f'f{fstring!r}', kwargs)
 
 def _format_message(sender, event, message, root: bool = False) -> str:
     return f"{f'<{sender}>' if root else f'[{sender}]':<16} - {event:<12} | {message}"
@@ -182,7 +182,7 @@ class UserNameValidator(Validator):
         if re.search(r"^[A-Za-z0-9_-]+$", value):
             return value
         else:
-            raise ValueError(f"Wrong value of user name @{self.id}; got {repr(value)}, expected ^[A-Za-z0-9_-]+$")
+            raise ValueError(f"Wrong value of user name @{self.id}; got {value!r}, expected ^[A-Za-z0-9_-]+$")
 
 
 class CookieValidator(Validator):
@@ -238,7 +238,7 @@ class JobNameValidator(Validator):
         if re.search(r"^[A-Za-z0-9_-]+$", value):
             return value
         else:
-            raise ValueError(f"Wrong value of job name @{self.id}; got {repr(value)}, expected ^[A-Za-z0-9_-]+$")
+            raise ValueError(f"Wrong value of job name @{self.id}; got {value!r}, expected ^[A-Za-z0-9_-]+$")
 
 
 class CommandValidator(Validator):
@@ -365,7 +365,7 @@ class CookieParser:
                 with open(value, "r") as f:
                     actual_value = f.read()
             case _:
-                raise ValueError(f"Wrong value of cookies source @{self.id}; got {repr(source)}, expected in {repr(['string', 'file'])}")
+                raise ValueError(f"Wrong value of cookies source @{self.id}; got {source!r}, expected in {['string', 'file']!r}")
 
         cookies: list[dict[str, Any]] | None
         options: dict[str, Any] | None
@@ -387,7 +387,7 @@ class CookieParser:
             case "live":
                 cookies, options = None, json.loads(actual_value)
             case _:
-                raise ValueError(f"Wrong value of cookies type @{self.id}; got {repr(type)}, expected in {repr(['header', 'json', 'live'])}")
+                raise ValueError(f"Wrong value of cookies type @{self.id}; got {type!r}, expected in {['header', 'json', 'live']!r}")
 
         if cookies is not None:
             for cookie in cookies:
@@ -406,7 +406,7 @@ class CookieParser:
             case "migrate":
                 actual_mode = CookieMode.MIGRATE
             case _:
-                raise ValueError(f"Wrong value of cookies mode @{self.id}; got {repr(mode)}, expected in {repr(['interactive', 'fallback', 'override', 'migrate'])}")
+                raise ValueError(f"Wrong value of cookies mode @{self.id}; got {mode!r}, expected in {['interactive', 'fallback', 'override', 'migrate']!r}")
 
         return CookieProvider(cookies, actual_mode, options)
 
@@ -433,7 +433,7 @@ class ModImporter:
             case "expression":
                 mod = _safe_eval(value, context)
             case _:
-                raise ValueError(f"Wrong value of type @{self.id}; got {repr(type)}, expected in {repr(['module', 'expression'])}")
+                raise ValueError(f"Wrong value of type @{self.id}; got {type!r}, expected in {['module', 'expression']!r}")
 
         return mod
 
@@ -455,7 +455,7 @@ class ModImporter:
                 case "expression":
                     mod = _safe_eval(value, context)
                 case _:
-                    raise ValueError(f"Wrong value of type for mod {repr(name)} @{self.id}; got {repr(type)}, expected in {repr(['module', 'expression'])}")
+                    raise ValueError(f"Wrong value of type for mod {name!r} @{self.id}; got {type!r}, expected in {['module', 'expression']!r}")
 
             mods[name] = mod
 
@@ -474,7 +474,7 @@ class TemplateSelector:
 
     def select(self, templates, mode: str | None = None) -> Any:
         if not templates:
-            raise ValueError(f"Wrong value of select templates @{self.id}; got {repr(templates)}, expected [templates]{{1,}}")
+            raise ValueError(f"Wrong value of select templates @{self.id}; got {templates!r}, expected [templates]{{1,}}")
 
         template: Any
 
@@ -482,7 +482,7 @@ class TemplateSelector:
             case None | "random":
                 template = random.choice(templates)
             case _:
-                raise ValueError(f"Wrong value of select mode @{self.id}; got {repr(mode)}, expected in {repr(['random'])}")
+                raise ValueError(f"Wrong value of select mode @{self.id}; got {mode!r}, expected in {['random']!r}")
 
         return template
 
@@ -516,7 +516,7 @@ class PathProvider:
         folders = self.__folders
 
         if folder not in folders:
-            raise ValueError(f"Wrong value of folder @{self.id}; got {repr(folder)}, expected in {repr(folders)}")
+            raise ValueError(f"Wrong value of folder @{self.id}; got {folder!r}, expected in {folders!r}")
 
         folder_path = os.path.join(self.__base_dir, folder)
 
@@ -748,7 +748,7 @@ class FeatureProvider:
         self.__features = {
             key: (lambda container: value(container)
                   if hasattr(container.config.features, key) and getattr(container.config.features, key).enabled()
-                  else _raise_exception(RuntimeError(f"@{container.config.id()} feature {repr(key)} is not enabled")))
+                  else _raise_exception(RuntimeError(f"@{container.config.id()} feature {key!r} is not enabled")))
                 for key, value in self.__features.items()
         }
 
@@ -763,7 +763,7 @@ class FeatureProvider:
         features = self.__features
 
         if not (feature := features.get(key, None)):
-            raise RuntimeError(f"@{container.config.id()} feature {repr(key)} is not supported")
+            raise RuntimeError(f"@{container.config.id()} feature {key!r} is not supported")
 
         return feature(container)
 
@@ -927,7 +927,7 @@ class Poster:
 
                 # never
                 case _:
-                    raise ValueError(f"Wrong value of provider.mode @{self.id}; got {repr(provider.mode)}, expected in {repr(['interactive', 'fallback', 'override', 'migrate'])}")
+                    raise ValueError(f"Wrong value of provider.mode @{self.id}; got {provider.mode!r}, expected in {['interactive', 'fallback', 'override', 'migrate']!r}")
 
             if _InternalCookiePolicy.SANITIZE in cookie_policy:
                 driver.get("https://login.sina.com.cn/sso/logout.php?entry=miniblog&r=")
@@ -1022,7 +1022,7 @@ class Poster:
             case "comment":
                 self.__send_comment(text, images, options)
             case _:
-                raise ValueError(f"Wrong value of behavior @{self.id}; got {repr(behavior)}, expected in {repr(['origin', 'repost', 'comment'])}")
+                raise ValueError(f"Wrong value of behavior @{self.id}; got {behavior!r}, expected in {['origin', 'repost', 'comment']!r}")
 
     def __send_origin(self, text: str, images: list[str], options: dict[str, Any]) -> None:
 
@@ -1043,7 +1043,7 @@ class Poster:
             return _predicate
 
         if not images and (not text or text.isspace()):
-            raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace, if there is no images")
+            raise ValueError(f"Wrong value of text @{self.id}; got {text!r}, expected not empty and not whitespace, if there is no images")
 
         engine = self.__engine
         preview = self.__preview
@@ -1098,7 +1098,7 @@ class Poster:
                     file_div_list: list[WebElement] = execution_wait.until(EC.presence_of_all_elements_located((By.XPATH, item_div_xpath)))[:-1]
 
                     if (files_diff := len(files) - len(file_div_list)) > 0:
-                        raise ValueError(f"Find {files_diff} unacceptable image(s) @{self.id}; got {images}, expected [images]{{0,18}} or [images and videos]{{0,9}}, accepted {repr(file_input_accept)}")
+                        raise ValueError(f"Find {files_diff} unacceptable image(s) @{self.id}; got {images}, expected [images]{{0,18}} or [images and videos]{{0,9}}, accepted {file_input_accept!r}")
 
                     for index in range(len(file_div_list)):
                         upload_wait.until(EC.all_of(
@@ -1154,14 +1154,14 @@ class Poster:
             return _predicate
 
         if not images and (not text or text.isspace()):
-            raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace, if there is no images")
+            raise ValueError(f"Wrong value of text @{self.id}; got {text!r}, expected not empty and not whitespace, if there is no images")
 
         stopic: dict[str, Any]
         stopic_value: dict[str, Any] | str = options.get("stopic")
 
         if isinstance(stopic_value, str):
             if not stopic_value or stopic_value.isspace():
-                raise ValueError(f"Wrong value of stopic @{self.id}; got {repr(stopic_value)}, expected not empty and not whitespace")
+                raise ValueError(f"Wrong value of stopic @{self.id}; got {stopic_value!r}, expected not empty and not whitespace")
 
             stopic = {
                 "title": stopic_value,
@@ -1173,7 +1173,7 @@ class Poster:
 
             if isinstance(stopic_title, str):
                 if not stopic_title or stopic_title.isspace():
-                    raise ValueError(f"Wrong value of stopic.title @{self.id}; got {repr(stopic_title)}, expected not empty and not whitespace")
+                    raise ValueError(f"Wrong value of stopic.title @{self.id}; got {stopic_title!r}, expected not empty and not whitespace")
 
                 stopic = {
                     "title": stopic_title,
@@ -1266,7 +1266,7 @@ class Poster:
                         break
 
             if stopic_item_div is None:
-                raise ValueError(f"Cannot find a stopic by stopic.title {repr(stopic['title'])} @{self.id}, please check the stopic options")
+                raise ValueError(f"Cannot find a stopic by stopic.title {stopic['title']!r} @{self.id}, please check the stopic options")
 
             driver.execute_script("arguments[0].click();", execution_wait.until(EC.element_to_be_clickable(stopic_item_div)))
             execution_wait.until(element_located_text_to_be((By.XPATH, stopic_title_span_xpath), stopic["title"]))
@@ -1313,7 +1313,7 @@ class Poster:
                     file_div_list: list[WebElement] = execution_wait.until(EC.presence_of_all_elements_located((By.XPATH, item_div_xpath)))[:-1]
 
                     if (files_diff := len(files) - len(file_div_list)) > 0:
-                        raise ValueError(f"Find {files_diff} unacceptable image(s) @{self.id}; got {images}, expected [images]{{0,18}}, accepted {repr(file_input_accept)}")
+                        raise ValueError(f"Find {files_diff} unacceptable image(s) @{self.id}; got {images}, expected [images]{{0,18}}, accepted {file_input_accept!r}")
 
                     for index in range(len(file_div_list)):
                         upload_wait.until(EC.all_of(
@@ -1358,10 +1358,10 @@ class Poster:
         quote: dict[str, Any] = options.get("quote", {})
 
         if not re.search(r"^[0-9]+$", quote["uid"]):
-            raise ValueError(f"Wrong value of quote.uid @{self.id}; got {repr(quote['uid'])}, expected ^[0-9]+$")
+            raise ValueError(f"Wrong value of quote.uid @{self.id}; got {quote['uid']!r}, expected ^[0-9]+$")
 
         if not re.search(r"^[A-Za-z0-9]+$", quote["bid"]):
-            raise ValueError(f"Wrong value of quote.bid @{self.id}; got {repr(quote['bid'])}, expected ^[A-Za-z0-9]+$")
+            raise ValueError(f"Wrong value of quote.bid @{self.id}; got {quote['bid']!r}, expected ^[A-Za-z0-9]+$")
 
         engine = self.__engine
         preview = self.__preview
@@ -1425,13 +1425,13 @@ class Poster:
         quote: dict[str, Any] = options.get("quote", {})
 
         if not re.search(r"^[0-9]+$", quote["uid"]):
-            raise ValueError(f"Wrong value of quote.uid @{self.id}; got {repr(quote['uid'])}, expected ^[0-9]+$")
+            raise ValueError(f"Wrong value of quote.uid @{self.id}; got {quote['uid']!r}, expected ^[0-9]+$")
 
         if not re.search(r"^[A-Za-z0-9]+$", quote["bid"]):
-            raise ValueError(f"Wrong value of quote.bid @{self.id}; got {repr(quote['bid'])}, expected ^[A-Za-z0-9]+$")
+            raise ValueError(f"Wrong value of quote.bid @{self.id}; got {quote['bid']!r}, expected ^[A-Za-z0-9]+$")
 
         if not text or text.isspace():
-            raise ValueError(f"Wrong value of text @{self.id}; got {repr(text)}, expected not empty and not whitespace")
+            raise ValueError(f"Wrong value of text @{self.id}; got {text!r}, expected not empty and not whitespace")
 
         engine = self.__engine
         preview = self.__preview
@@ -1563,7 +1563,7 @@ class User:
                     _format_message(
                         sender = job_id,
                         event = _EVENT_PROCESS,
-                        message = f'{repr(template_conf)} -> {repr(text if not images and not options else { "text": text, "images": images } if not options else { "text": text, "options": options } if not images else { "text": text, "images": images, "options": options })}'
+                        message = f'{template_conf!r} -> {(text if not images and not options else { "text": text, "images": images } if not options else { "text": text, "options": options } if not images else { "text": text, "images": images, "options": options })!r}'
                     )
                 )
 
@@ -1709,7 +1709,7 @@ class User:
                     _format_message(
                         sender = event.job_id,
                         event = _EVENT_EXECUTION,
-                        message = f"Oops, an error occurred! -> {repr(event.exception)}"
+                        message = f"Oops, an error occurred! -> {event.exception!r}"
                     )
                 ), _logger.info(
                     _format_message(
@@ -1872,7 +1872,7 @@ if __name__ == '__main__':
         _format_message(
             sender = _SYSTEM,
             event = _EVENT_EXECUTION,
-            message = f"Oops, an error occurred! -> {repr(value)}",
+            message = f"Oops, an error occurred! -> {value!r}",
             root = True
         )
     )
