@@ -57,6 +57,24 @@ _EVENT_NOTIFICATION = "Notification"
 _logger = logging.getLogger(__name__)
 
 
+class EvalError(Exception):
+    expr: str | None
+    cause: Exception | None
+
+    def __init__(self, expr: str | None = None, cause: Exception | None = None) -> None:
+        super().__init__(*(cause.args if cause is not None else ()))
+
+        self.expr = expr
+        self.cause = cause
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self.expr!r}, {self.cause!r})"
+
+
+class PreviewAbort(Exception):
+    pass
+
+
 def sync(lock):
     if isinstance(lock, LockType):
 
@@ -84,19 +102,23 @@ def sync(lock):
 
 
 def _safe_eval(expr: str, globals: dict[str, Any] | None = None, locals: dict[str, Any] | None = None) -> Any:
-    code = compile_restricted(expr, mode = "eval")
+    try:
+        code = compile_restricted(expr, mode = "eval")
 
-    return eval(code, {
-        "__builtins__": {
-            **safe_builtins,
+        return eval(code, {
+            "__builtins__": {
+                **safe_builtins,
 
-            "_getitem_": default_guarded_getitem,
-            "_getiter_": default_guarded_getiter,
-            "_iter_unpack_sequence_": guarded_iter_unpack_sequence
-        },
+                "_getitem_": default_guarded_getitem,
+                "_getiter_": default_guarded_getiter,
+                "_iter_unpack_sequence_": guarded_iter_unpack_sequence
+            },
 
-        **(globals if globals is not None else {})
-    }, locals)
+            **(globals if globals is not None else {})
+        }, locals)
+
+    except Exception as e:
+        raise EvalError(expr, e) from e
 
 def _format_fstring(fstring: str, **kwargs) -> str:
     return _safe_eval(f'f{fstring!r}', kwargs)
@@ -153,10 +175,6 @@ class FullCronTrigger(CronTrigger):
                            month = values[4], day_of_week = values[5], year = values[6], timezone = timezone, jitter = jitter)
             case _:
                 raise ValueError(f"Wrong number of fields; got {len(values)}, expected 5 or 6 or 7")
-
-
-class PreviewAbort(Exception):
-    pass
 
 
 class Validator:
