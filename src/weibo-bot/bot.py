@@ -837,36 +837,20 @@ class FeatureBuilder:
         return FeatureProvider(self.id, features)
 
 
-class Poster:
+class EngineAdapter:
     __engine: Engine
-    __preview: bool
 
-    def __init__(self, engine: Engine, preview: bool) -> None:
+    def __init__(self, engine: Engine) -> None:
         self.__engine = engine
-        self.__preview = preview
 
-        self.__with_cookies_sync()
-        self.__send_sync()
+        self.__load_cookies_sync()
 
     @property
     def id(self) -> str:
         return self.__engine.id
 
-    @property
-    def preview(self) -> bool:
-        return self.__preview
-
-    @preview.setter
-    def preview(self, value: bool) -> None:
-        self.__preview = value
-
-    def with_preview(self, value: bool):
-        self.preview = value
-
-        return self
-
-    def __with_cookies_sync(self): self.with_cookies = sync(self.__engine.lock)(self.with_cookies)
-    def with_cookies(self, provider: CookieProvider):
+    def __load_cookies_sync(self): self.load_cookies = sync(self.__engine.lock)(self.load_cookies)
+    def load_cookies(self, provider: CookieProvider):
         engine = self.__engine
 
         driver = engine.driver
@@ -1018,6 +1002,34 @@ class Poster:
                 root = True
             )
         )
+
+        return self
+
+
+class Poster:
+    __engine: Engine
+    __preview: bool
+
+    def __init__(self, engine: Engine, preview: bool) -> None:
+        self.__engine = engine
+        self.__preview = preview
+
+        self.__send_sync()
+
+    @property
+    def id(self) -> str:
+        return self.__engine.id
+
+    @property
+    def preview(self) -> bool:
+        return self.__preview
+
+    @preview.setter
+    def preview(self, value: bool) -> None:
+        self.__preview = value
+
+    def with_preview(self, value: bool):
+        self.preview = value
 
         return self
 
@@ -1643,7 +1655,9 @@ class User:
                 **(conf.get("vars", {}))
             })
             jobs: dict[str, dict[str, Any]] = conf.get("jobs", default_conf.get("jobs", {}))
-            poster = Poster(engine, preview).with_cookies(cookies)
+
+            EngineAdapter(engine).load_cookies(cookies)
+            poster = Poster(engine, preview)
             scheduler = BackgroundScheduler()
 
             for job_name, job_conf in jobs.items():
