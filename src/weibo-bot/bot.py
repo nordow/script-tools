@@ -1006,7 +1006,7 @@ class EngineAdapter:
         return self
 
 
-class Poster:
+class Emulator:
     __engine: Engine
     __preview: bool
 
@@ -1531,7 +1531,7 @@ class User:
     def __init__(self, name: str, conf: dict[str, Any], default_conf: dict[str, Any], preview: bool) -> None:
 
         @sync
-        def send_post(poster: Poster, kwargs: dict[str, Any]) -> bool:
+        def send_post(emulator: Emulator, kwargs: dict[str, Any]) -> bool:
 
             def eval_vars(vars: dict[str, Any], bins: dict[str, Any], envs: dict[str, Any], mods: dict[str, Any]) -> dict[str, Any]:
                 evaluated_vars: dict[str, Any] = {}
@@ -1598,7 +1598,7 @@ class User:
                 )
 
                 try:
-                    poster.send(text = text, images = images, options = options)
+                    emulator.send(text = text, images = images, options = options)
                 except PreviewAbort:
                     real = False
                 else:
@@ -1657,7 +1657,7 @@ class User:
             jobs: dict[str, dict[str, Any]] = conf.get("jobs", default_conf.get("jobs", {}))
 
             EngineAdapter(engine).load_cookies(cookies)
-            poster = Poster(engine, preview)
+            emulator = Emulator(engine, preview)
             scheduler = BackgroundScheduler()
 
             for job_name, job_conf in jobs.items():
@@ -1685,7 +1685,7 @@ class User:
                         "templates": job_templates,
                     },
 
-                    "poster": poster
+                    "emulator": emulator
                 }, id = job_id)
 
             scheduler.add_listener(
